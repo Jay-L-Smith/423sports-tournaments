@@ -46,3 +46,9 @@ Dead simple. Big buttons. Phone-first (landscape for brackets). Hide complexity.
 ## Demo
 
 McMinn / TWU, 15U, 40 teams. Parks: Tennessee Wesleyan, Athens, Calhoun, Etowah, Englewood, Riceville.
+
+## Note on this repo
+
+This is a **source snapshot** of the live 423Sports tournament app for review in Grok chat. Seed admin credentials are **not** published here.
+
+Start with `src/lib/pbi/bracket.ts` and `src/components/bracket-board.tsx`.
