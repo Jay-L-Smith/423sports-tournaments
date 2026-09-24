@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RedirectToSignIn } from "@/lib/auth/gates";
 import {
-  listNotifications,
   listOpenTournaments,
   registerTeam,
   type OpenAge,
@@ -30,11 +29,6 @@ function RegisterTeamPage() {
   const [name, setName] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const notifQuery = useQuery({
-    queryKey: ["notifications", user?.id],
-    queryFn: () => listNotifications(),
-    enabled: Boolean(user && profile),
-  });
   const openQuery = useQuery({
     queryKey: ["open-tournaments"],
     queryFn: () => listOpenTournaments(),
@@ -60,7 +54,6 @@ function RegisterTeamPage() {
   if (!profile) return <Navigate to="/" />;
   if (profile.homeRole !== "coach") return <Navigate to="/" />;
 
-  const unread = (notifQuery.data ?? []).filter((n) => !n.read).length;
   const tournaments = openQuery.data ?? [];
   const selected = tournaments.find((item) => item.id === weekendId) ?? null;
   const errorText =
@@ -94,7 +87,7 @@ function RegisterTeamPage() {
   }
 
   return (
-    <AppShell homeRole={profile.homeRole} unread={unread}>
+    <AppShell homeRole={profile.homeRole}>
       <Link to="/teams" className="text-sm font-semibold text-primary">
         My team
       </Link>

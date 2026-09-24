@@ -1,4 +1,5 @@
-import { parseBracketRules, type BracketRules } from "./rules.ts";
+import { normalizeDivisions, parseBracketRules, type BracketRules } from "./rules.ts";
+
 
 export const AGE_GROUPS = [
   "8U",
@@ -16,6 +17,8 @@ export const AGE_GROUPS = [
 export type AgeGroup = (typeof AGE_GROUPS)[number];
 
 export const MAX_TOURNAMENT_TEAMS = 40;
+export const DEFAULT_TOURNAMENT_TEAMS = 10;
+export const DEFAULT_AGE_MIN_TEAMS = 3;
 
 export const TEAM_STATUSES = ["pending", "approved", "denied"] as const;
 export type TeamStatus = (typeof TEAM_STATUSES)[number];
@@ -44,6 +47,55 @@ export function isoDateFromLocal(date: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Last day to add a team is the day before the tournament. A scored game closes it early. */
+export function teamEntryClosed(opts: { startDate: string; today: string; scored?: boolean }): string | null {
+  if (opts.today >= opts.startDate) {
+    return "New teams close the day before the tournament starts.";
+  }
+  if (opts.scored) {
+    return "New teams close once a game has a score.";
+  }
+  return null;
+}
+
+/** The sheet locks itself 72 hours before first pitch. A director can lock earlier or unlock. */
+export const SHEET_LOCK_MS = 72 * 60 * 60 * 1000;
+export type SheetLock = "auto" | "on" | "off";
+
+export function parseSheetLock(value: unknown): SheetLock {
+  return value === "on" || value === "off" ? value : "auto";
+}
+
+export function firstPitchAt(startDate: string, firstPitch: string): Date | null {
+  if (!isIsoDate(startDate)) return null;
+  const [y, m, d] = startDate.split("-").map(Number);
+  const match = /^(\d{1,2}):(\d{2})/.exec(firstPitch || "");
+  const hh = match ? Number(match[1]) : 8;
+  const mm = match ? Number(match[2]) : 0;
+  if (hh > 23 || mm > 59) return null;
+  return new Date(y, m - 1, d, hh, mm, 0, 0);
+}
+
+export function sheetIsLocked(opts: {
+  lock: SheetLock;
+  startDate: string;
+  firstPitch: string;
+  now?: Date;
+}): boolean {
+  if (opts.lock === "on") return true;
+  if (opts.lock === "off") return false;
+  const start = firstPitchAt(opts.startDate, opts.firstPitch);
+  if (!start) return false;
+  const now = opts.now ?? new Date();
+  return now.getTime() >= start.getTime() - SHEET_LOCK_MS;
+}
+
+export function beforeFirstPitch(startDate: string, firstPitch: string, now = new Date()): boolean {
+  const start = firstPitchAt(startDate, firstPitch);
+  if (!start) return false;
+  return now.getTime() < start.getTime();
+}
+
 export function defaultWeekendDates(now = new Date()): { startDate: string; endDate: string } {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0);
   const day = d.getDay();
@@ -58,6 +110,13 @@ function parseLocalIso(iso: string): Date | null {
   if (!isIsoDate(iso)) return null;
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d);
+}
+
+export function addDays(iso: string, days: number): string {
+  const dt = parseLocalIso(iso);
+  if (!dt) return iso;
+  dt.setDate(dt.getDate() + days);
+  return isoDateFromLocal(dt);
 }
 
 export function formatWeekendRange(start: string, end: string): string {
@@ -157,10 +216,21 @@ export function parseDayPlan(
     }
   }
   if (byDate.size === 0) return fallback;
-  return dates.map((date, i) => ({
+  const plan = dates.map((date, i) => ({
     date,
     kind: byDate.get(date) ?? fallback[i]?.kind ?? "bracket",
   }));
+  // Two-day weekends stay Saturday pool, Sunday bracket. A mixed first day
+  // puts pool games on the same sheet as the bracket.
+  if (
+    poolPlay &&
+    plan.length === 2 &&
+    plan[0]?.kind === "mixed" &&
+    plan[1]?.kind === "bracket"
+  ) {
+    return [{ date: plan[0].date, kind: "pool" }, plan[1]];
+  }
+  return plan;
 }
 
 export function hasPoolDays(plan: DayPlan[]): boolean {
@@ -190,6 +260,7 @@ export type WeekendInput = {
   maxTeams: number;
   poolPlay: boolean;
   dayPlan: DayPlan[];
+  rules: BracketRules;
 };
 
 export function parsePoolPlay(value: unknown): boolean {
@@ -206,6 +277,7 @@ export function parseWeekendInput(data: {
   maxTeams?: unknown;
   poolPlay?: unknown;
   dayPlan?: unknown;
+  rules?: unknown;
 }): WeekendInput {
   const name = typeof data.name === "string" ? data.name.trim() : "";
   if (name.length < 2) throw new Error("Give the tournament a name. Location is fine.");
@@ -230,22 +302,24 @@ export function parseWeekendInput(data: {
     : poolGiven && !parsePoolPlay(data.poolPlay)
       ? parseDayPlan([], startDate, endDate, false)
       : defaultDayPlan(startDate, endDate);
+  const maxTeams = parseTournamentMax(data.maxTeams);
 
   return {
     name,
     startDate,
     endDate,
     ageGroups,
-    maxTeams: parseTournamentMax(data.maxTeams),
+    maxTeams,
     dayPlan,
     poolPlay: hasPoolDays(dayPlan),
+    rules: parseBracketRules(data.rules, maxTeams),
   };
 }
 
 export function parseTournamentMax(value: unknown): number {
-  if (value == null || String(value).trim() === "") return MAX_TOURNAMENT_TEAMS;
+  if (value == null || String(value).trim() === "") return DEFAULT_TOURNAMENT_TEAMS;
   const n = parseTeamCount(value, "Max teams");
-  if (n == null) return MAX_TOURNAMENT_TEAMS;
+  if (n == null) return DEFAULT_TOURNAMENT_TEAMS;
   return n;
 }
 
@@ -341,9 +415,70 @@ export function parseWeekendUpdate(data: {
     maxTeams: data.maxTeams,
     poolPlay: data.poolPlay,
     dayPlan: data.dayPlan,
+    rules: data.rules,
   });
   const caps = parseAgeCaps({ weekendId, ages: data.ages });
-  return { weekendId, ...base, ages: caps.ages, rules: parseBracketRules(data.rules) };
+  return {
+    weekendId,
+    ...base,
+    ages: caps.ages,
+    rules: { ...base.rules, divisions: normalizeDivisions(base.rules.divisions, base.maxTeams) },
+  };
+}
+
+export const PARK_AMENITIES = [
+  ["chairs", "Chairs"],
+  ["canopies", "Canopies"],
+  ["concessions", "Concessions"],
+  ["restrooms", "Restrooms"],
+  ["lights", "Field lights"],
+  ["bleachers", "Bleachers"],
+] as const;
+
+export type ParkAmenityKey = (typeof PARK_AMENITIES)[number][0];
+
+export type ParkFlags = Record<ParkAmenityKey, boolean> & {
+  entranceFee: boolean;
+  entrancePrice: string;
+  ageDiscount: boolean;
+  discountAges: AgeGroup[];
+  discountPrice: string;
+};
+
+export function emptyParkFlags(): ParkFlags {
+  return {
+    chairs: false,
+    canopies: false,
+    concessions: false,
+    restrooms: false,
+    lights: false,
+    bleachers: false,
+    entranceFee: false,
+    entrancePrice: "",
+    ageDiscount: false,
+    discountAges: [],
+    discountPrice: "",
+  };
+}
+
+function parkMoney(value: unknown): string {
+  const text = String(value ?? "").trim().replace(/^\$/, "");
+  return /^\d{1,4}(\.\d{1,2})?$/.test(text) ? text : "";
+}
+
+export function parseParkFlags(data: unknown): ParkFlags {
+  const src = data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+  const flags = emptyParkFlags();
+  for (const [key] of PARK_AMENITIES) flags[key] = src[key] === true;
+  flags.entranceFee = src.entranceFee === true;
+  flags.entrancePrice = parkMoney(src.entrancePrice);
+  flags.ageDiscount = flags.entranceFee && src.ageDiscount === true;
+  flags.discountPrice = flags.ageDiscount ? parkMoney(src.discountPrice) : "";
+  const rawAges = Array.isArray(src.discountAges) ? src.discountAges : [];
+  flags.discountAges = flags.ageDiscount
+    ? AGE_GROUPS.filter((age) => rawAges.includes(age))
+    : [];
+  return flags;
 }
 
 export function parseLocationInput(data: {

@@ -14,6 +14,7 @@ import { Route as AccountRouteImport } from './routes/account'
 import { Route as JoinRouteImport } from './routes/join'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
+import { Route as ResourcesRouteImport } from './routes/resources'
 import { Route as ScheduleRouteImport } from './routes/schedule'
 import { Route as TeamsRouteImport } from './routes/teams'
 import { Route as WeekendsRouteImport } from './routes/weekends'
@@ -53,6 +54,11 @@ const LoginRoute = LoginRouteImport.update({
 const NotificationsRoute = NotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResourcesRoute = ResourcesRouteImport.update({
+  id: '/resources',
+  path: '/resources',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ScheduleRoute = ScheduleRouteImport.update({
@@ -138,6 +144,7 @@ export interface FileRoutesByFullPath {
   '/join': typeof JoinRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/resources': typeof ResourcesRoute
   '/schedule': typeof ScheduleRoute
   '/teams': typeof TeamsRouteWithChildren
   '/weekends': typeof WeekendsRouteWithChildren
@@ -160,6 +167,7 @@ export interface FileRoutesByTo {
   '/join': typeof JoinRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/resources': typeof ResourcesRoute
   '/schedule': typeof ScheduleRoute
   '/bracket/$weekendId': typeof BracketWeekendIdRoute
   '/teams/$teamId': typeof TeamsTeamIdRoute
@@ -180,6 +188,7 @@ export interface FileRoutesById {
   '/join': typeof JoinRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
+  '/resources': typeof ResourcesRoute
   '/schedule': typeof ScheduleRoute
   '/teams': typeof TeamsRouteWithChildren
   '/weekends': typeof WeekendsRouteWithChildren
@@ -204,6 +213,7 @@ export interface FileRouteTypes {
     | '/join'
     | '/login'
     | '/notifications'
+    | '/resources'
     | '/schedule'
     | '/teams'
     | '/weekends'
@@ -226,6 +236,7 @@ export interface FileRouteTypes {
     | '/join'
     | '/login'
     | '/notifications'
+    | '/resources'
     | '/schedule'
     | '/bracket/$weekendId'
     | '/teams/$teamId'
@@ -245,6 +256,7 @@ export interface FileRouteTypes {
     | '/join'
     | '/login'
     | '/notifications'
+    | '/resources'
     | '/schedule'
     | '/teams'
     | '/weekends'
@@ -268,6 +280,7 @@ export interface RootRouteChildren {
   JoinRoute: typeof JoinRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
+  ResourcesRoute: typeof ResourcesRoute
   ScheduleRoute: typeof ScheduleRoute
   TeamsRoute: typeof TeamsRouteWithChildren
   WeekendsRoute: typeof WeekendsRouteWithChildren
@@ -310,6 +323,13 @@ declare module '@tanstack/react-router' {
       path: '/notifications'
       fullPath: '/notifications'
       preLoaderRoute: typeof NotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/resources': {
+      id: '/resources'
+      path: '/resources'
+      fullPath: '/resources'
+      preLoaderRoute: typeof ResourcesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/schedule': {
@@ -473,6 +493,7 @@ const rootRouteChildren: RootRouteChildren = {
   JoinRoute: JoinRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
+  ResourcesRoute: ResourcesRoute,
   ScheduleRoute: ScheduleRoute,
   TeamsRoute: TeamsRouteWithChildren,
   WeekendsRoute: WeekendsRouteWithChildren,

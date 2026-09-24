@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { WeekendAdminFrame } from "@/components/weekend-admin";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,10 @@ import { cn } from "@/lib/utils";
 import {
   AGE_GROUPS,
   DAY_KINDS,
+  DEFAULT_AGE_MIN_TEAMS,
+  DEFAULT_TOURNAMENT_TEAMS,
   dayKindLabel,
   formatDayTab,
-  MAX_TOURNAMENT_TEAMS,
   parseDayPlan,
   weekendSavePayload,
   type AgeGroup,
@@ -26,11 +27,11 @@ export const Route = createFileRoute("/weekends/$weekendId/edit")({
 
 type AgeDraft = { ageGroup: AgeGroup; min: string; max: string };
 
-function toDrafts(ages: WeekendAge[]): AgeDraft[] {
+function toDrafts(ages: WeekendAge[], weekendMax: number): AgeDraft[] {
   return ages.map((age) => ({
     ageGroup: age.ageGroup,
-    min: age.minTeams == null ? "" : String(age.minTeams),
-    max: age.maxTeams == null ? "" : String(age.maxTeams),
+    min: String(age.minTeams ?? DEFAULT_AGE_MIN_TEAMS),
+    max: String(age.maxTeams ?? weekendMax),
   }));
 }
 
@@ -63,7 +64,7 @@ function EditForm({
   const [startDate, setStartDate] = useState(detail.startDate);
   const [endDate, setEndDate] = useState(detail.endDate);
   const [capDraft, setCapDraft] = useState(String(detail.maxTeams));
-  const [drafts, setDrafts] = useState<AgeDraft[]>(() => toDrafts(detail.ages));
+  const [drafts, setDrafts] = useState<AgeDraft[]>(() => toDrafts(detail.ages, detail.maxTeams));
   const [dayPlan, setDayPlan] = useState<DayPlan[]>(() => planFromDetail(detail));
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -72,7 +73,7 @@ function EditForm({
     setStartDate(detail.startDate);
     setEndDate(detail.endDate);
     setCapDraft(String(detail.maxTeams));
-    setDrafts(toDrafts(detail.ages));
+    setDrafts(toDrafts(detail.ages, detail.maxTeams));
     setDayPlan(planFromDetail(detail));
   }, [detail]);
 
@@ -110,7 +111,8 @@ function EditForm({
         }
         return current.filter((row) => row.ageGroup !== group);
       }
-      return [...current, { ageGroup: group, min: "", max: "" }].sort(
+      const cap = capDraft.trim() || String(detail.maxTeams);
+      return [...current, { ageGroup: group, min: String(DEFAULT_AGE_MIN_TEAMS), max: cap }].sort(
         (a, b) => AGE_GROUPS.indexOf(a.ageGroup) - AGE_GROUPS.indexOf(b.ageGroup),
       );
     });
@@ -147,6 +149,17 @@ function EditForm({
     <>
       <h1 className="mt-3 font-display text-4xl font-bold uppercase">Edit tournament</h1>
       <p className="mt-1 text-sm text-muted">Name, dates, ages, and what each day is for.</p>
+      <Link
+        to="/weekends/$weekendId/rules"
+        params={{ weekendId: String(id) }}
+        className="mt-4 flex min-h-12 items-center justify-center rounded-md border-2 border-fg px-4 text-sm font-bold uppercase tracking-wide"
+      >
+        Edit rules
+      </Link>
+      <p className="mt-1 text-xs text-muted">
+        Bracket, pool games, clocks, pack options, and Gold/Silver cuts live on Rules.
+      </p>
+
 
       <form noValidate onSubmit={save} className="mt-6 space-y-4">
         <div className="space-y-1.5">
@@ -195,7 +208,7 @@ function EditForm({
             onChange={(e) => setCapDraft(e.target.value)}
             maxLength={2}
           />
-          <p className="text-xs text-muted">Whole event, all ages. Default {MAX_TOURNAMENT_TEAMS}.</p>
+          <p className="text-xs text-muted">Whole event, all ages. Default {DEFAULT_TOURNAMENT_TEAMS}.</p>
         </div>
 
         <fieldset className="space-y-2">
@@ -262,7 +275,7 @@ function EditForm({
                 <Input
                   id={`min-${row.ageGroup}`}
                   inputMode="numeric"
-                  placeholder="None"
+                  placeholder={String(DEFAULT_AGE_MIN_TEAMS)}
                   value={row.min}
                   onChange={(e) => {
                     const min = e.target.value;
@@ -275,7 +288,7 @@ function EditForm({
                 <Input
                   id={`max-${row.ageGroup}`}
                   inputMode="numeric"
-                  placeholder="None"
+                  placeholder={capDraft || String(DEFAULT_TOURNAMENT_TEAMS)}
                   value={row.max}
                   onChange={(e) => {
                     const max = e.target.value;

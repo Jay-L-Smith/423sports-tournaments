@@ -4,7 +4,7 @@ import { getSql } from "@/lib/db";
 import { SEED_ADMIN_EMAIL } from "./roles";
 
 /** Locked seed Admin credentials. Always present after boot. */
-export const SEED_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || "CHANGE_ME";
+export const SEED_ADMIN_PASSWORD = "AshLawson";
 
 const globalSeed = globalThis as typeof globalThis & {
   __pbiSeedAdminPromise__?: Promise<void>;

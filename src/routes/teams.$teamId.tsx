@@ -10,7 +10,6 @@ import { RedirectToSignIn } from "@/lib/auth/gates";
 import {
   addPlayer,
   getMyTeam,
-  listNotifications,
   removePlayer,
   type RegisteredTeam,
 } from "@/lib/pbi/api";
@@ -28,11 +27,6 @@ function TeamDetailPage() {
   const [jersey, setJersey] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const notifQuery = useQuery({
-    queryKey: ["notifications", user?.id],
-    queryFn: () => listNotifications(),
-    enabled: Boolean(user && profile),
-  });
   const teamQuery = useQuery({
     queryKey: ["my-team", id],
     queryFn: () => getMyTeam({ data: { id } }),
@@ -85,7 +79,6 @@ function TeamDetailPage() {
   if (profile.homeRole !== "coach") return <Navigate to="/" />;
   if (!Number.isInteger(id) || id < 1) return <Navigate to="/teams" />;
 
-  const unread = (notifQuery.data ?? []).filter((n) => !n.read).length;
   const team = teamQuery.data;
   const errorText =
     formError ??
@@ -108,7 +101,7 @@ function TeamDetailPage() {
   }
 
   return (
-    <AppShell homeRole={profile.homeRole} unread={unread}>
+    <AppShell homeRole={profile.homeRole}>
       <Link to="/teams" className="text-sm font-semibold text-primary">
         My team
       </Link>

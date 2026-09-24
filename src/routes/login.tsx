@@ -1,6 +1,5 @@
 import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { BrandLockup } from "@/components/brand";
 import { SessionSkeleton } from "@/components/session-gate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,10 +47,10 @@ function Login() {
   if (user && !busy) return <Navigate to="/" />;
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-10">
-      <div className="mb-8">
-        <BrandLockup />
-        <p className="mt-4 text-sm text-muted">Email and password</p>
+    <main className="site-splash mx-auto flex min-h-dvh max-w-md flex-col justify-center px-5 py-10">
+      <div className="mb-8 text-center">
+        <img src="/logo.png" alt="423Sports" className="mx-auto block w-full max-w-[19rem]" />
+        <p className="mt-6 text-sm text-white/60">Email and password</p>
       </div>
       {!authEnabled ? (
         <p className="text-muted">Sign-in is disabled.</p>
@@ -63,7 +62,7 @@ function Login() {
             e.stopPropagation();
             void handleSignIn();
           }}
-          className="space-y-4"
+          className="space-y-4 [&_label]:text-white"
         >
           <div className="space-y-1.5">
             <Label htmlFor="email">Email</Label>
@@ -89,22 +88,25 @@ function Login() {
             />
           </div>
           {error ? (
-            <p className="rounded-md bg-warn-bg px-3 py-2 text-sm font-medium" role="alert">
+            <p
+              className="rounded-md border border-[#6b5420] bg-[#ffe08a] px-3 py-2 text-sm font-semibold text-[#1a1a1a]"
+              role="alert"
+            >
               {error}
             </p>
           ) : null}
-          <Button type="submit" className="w-full" size="lg" disabled={busy}>
+          <Button type="submit" className="site-cta w-full" size="lg" disabled={busy}>
             {busy ? "Signing in…" : "Sign in"}
           </Button>
         </form>
       )}
-      <p className="mt-6 text-center text-sm text-muted">
+      <p className="mt-6 text-center text-sm text-white/70">
         New here?{" "}
-        <Link to="/join" className="font-semibold text-primary">
+        <Link to="/join" className="font-semibold text-white">
           Create an account
         </Link>
       </p>
-      <p className="mt-4 text-center text-xs text-muted">
+      <p className="mt-4 text-center text-xs text-white/50">
         The director Admin account is already set up. Sign in — don’t create it again.
       </p>
     </main>

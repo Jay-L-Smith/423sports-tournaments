@@ -1,8 +1,11 @@
 import { defaultDayPlan, parseDayPlan, type DayPlan } from "./weekends.ts";
+import type { Tiebreaker } from "./rules.ts";
 
 export const GAME_SLOT_MINUTES = 120;
 export const FIRST_PITCH = "08:00";
-export const LAST_START = "19:00";
+export const LAST_START = "20:00";
+export const LAST_DAY_LAST_START = "22:00";
+export const MAX_POOL_SIZE = 7;
 
 export const ROUND_IDS = ["r64", "r32", "r16", "qf", "sf", "f"] as const;
 export type RoundId = (typeof ROUND_IDS)[number];
@@ -25,9 +28,28 @@ export function nextPowerOfTwo(n: number): number {
   return size;
 }
 
-export function seedPlacement(size: number): number[] {
+export function previousPowerOfTwo(n: number): number {
+  if (n <= 2) return 2;
+  let size = 2;
+  while (size * 2 < n) size *= 2;
+  return size;
+}
+
+/** Extra byes so the next round is the previous power of two. Null for a full bracket or a single odd bye. */
+export function playInPlan(teamCount: number): { byes: number; playing: number; games: number } | null {
+  if (teamCount < 4) return null;
+  const size = nextPowerOfTwo(teamCount);
+  if (size === teamCount) return null;
+  const byes = size - teamCount;
+  const playing = teamCount - byes;
+  if (byes <= 1 || playing < 2) return null;
+  return { byes, playing, games: playing / 2 };
+}
+
+export function seedPlacement(size: number, firstVsLast = true): number[] {
   if (size <= 1) return [1];
-  const half = seedPlacement(size / 2);
+  if (!firstVsLast) return Array.from({ length: size }, (_, i) => i + 1);
+  const half = seedPlacement(size / 2, true);
   const out: number[] = [];
   for (const seed of half) {
     out.push(seed);
@@ -59,16 +81,32 @@ export function roundLabel(round: GameRound): string {
 }
 
 export function treeRoundLabel(round: RoundId, first: RoundId, playIns: boolean): string {
-  if (round === first && playIns && round !== "f") return "Round 1 (Play-Ins)";
+  if (round === first && round !== "f") return playIns ? "Play-ins" : "Round 1";
   return roundLabel(round);
 }
 
-/** Only the championship shares one field. Early games and semis can run in parallel. */
-export function collapseToOneField(round: RoundId, _rounds: RoundId[]): boolean {
-  return round === "f";
+/** True only when the first round gives more than the single odd-count bye. */
+export function hasPlayInRound(games: { round: string; isBye?: boolean }[]): boolean {
+  const first = ROUND_IDS.find((round) => games.some((game) => game.round === round));
+  if (!first) return false;
+  return games.filter((game) => game.round === first && game.isBye).length > 1;
 }
 
-export type SeedSlot = { seed: number; teamId: number | null };
+/** Only the championship shares one field. Early games and semis can run in parallel. */
+export function collapseToOneField(round: RoundId, _rounds: RoundId[], championshipCollapse = true): boolean {
+  return championshipCollapse && round === "f";
+}
+
+export type SeedSlot = { seed: number; teamId: number | null; open?: boolean };
+
+/** Real seeds only — 1..count. Padding byes are added in buildGames, not here. */
+export function bracketField(count: number, teamAt: (seed: number) => number | null): SeedSlot[] {
+  const n = Math.max(0, Math.trunc(count));
+  return Array.from({ length: n }, (_, i) => {
+    const seed = i + 1;
+    return { seed, teamId: teamAt(seed), open: true };
+  });
+}
 
 export function syncSeeds(existing: SeedSlot[], teamIds: number[]): SeedSlot[] {
   const unique = [...new Set(teamIds)];
@@ -117,8 +155,15 @@ export type BuiltGame = {
   awayTeamId: number | null;
 };
 
-function teamAt(slots: SeedSlot[], seed: number): number | null {
-  return slots.find((row) => row.seed === seed)?.teamId ?? null;
+function teamOn(entries: SeedSlot[], seed: number): number | null {
+  return entries.find((row) => row.seed === seed)?.teamId ?? null;
+}
+
+function realEntries(slots: SeedSlot[]): SeedSlot[] {
+  const flagged = slots.some((row) => row.open != null);
+  const rows = flagged ? slots.filter((row) => row.open || row.teamId != null) : slots.filter((row) => row.teamId != null);
+  const source = rows.length > 0 ? rows : slots;
+  return source.slice().sort((a, b) => a.seed - b.seed);
 }
 
 function knownWinner(game: BuiltGame): number | null {
@@ -126,40 +171,45 @@ function knownWinner(game: BuiltGame): number | null {
   return game.homeTeamId ?? game.awayTeamId;
 }
 
-export function buildGames(slots: SeedSlot[]): BuiltGame[] {
-  const size = slots.length;
-  if (size < 2) return [];
+export function buildGames(slots: SeedSlot[], opts?: { firstVsLast?: boolean }): BuiltGame[] {
+  const entries = realEntries(slots);
+  const count = entries.length;
+  if (count < 2) return [];
+  const maxSeed = entries.reduce((max, row) => Math.max(max, row.seed), 0);
+  const size = nextPowerOfTwo(Math.max(count, maxSeed));
   const rounds = roundsForSize(size);
-  const placement = seedPlacement(size);
-  const games: BuiltGame[] = [];
   const first = rounds[0];
   if (!first) return [];
+  const placement = seedPlacement(size, opts?.firstVsLast !== false);
+  const realSeeds = new Set(entries.map((row) => row.seed));
+  const games: BuiltGame[] = [];
   const firstCount = size / 2;
   for (let slot = 0; slot < firstCount; slot += 1) {
     const homeSeed = placement[slot * 2] ?? null;
     const awaySeed = placement[slot * 2 + 1] ?? null;
-    const homeTeamId = homeSeed != null ? teamAt(slots, homeSeed) : null;
-    const awayTeamId = awaySeed != null ? teamAt(slots, awaySeed) : null;
+    const homeReal = homeSeed != null && realSeeds.has(homeSeed);
+    const awayReal = awaySeed != null && realSeeds.has(awaySeed);
     games.push({
       round: first,
       slot,
-      homeSeed,
-      awaySeed,
+      homeSeed: homeReal ? homeSeed : null,
+      awaySeed: awayReal ? awaySeed : null,
       homeFromRound: null,
       homeFromSlot: null,
       awayFromRound: null,
       awayFromSlot: null,
-      isBye: !(homeTeamId != null && awayTeamId != null),
-      homeTeamId,
-      awayTeamId,
+      isBye: !(homeReal && awayReal),
+      homeTeamId: homeReal && homeSeed != null ? teamOn(entries, homeSeed) : null,
+      awayTeamId: awayReal && awaySeed != null ? teamOn(entries, awaySeed) : null,
     });
   }
   for (let r = 1; r < rounds.length; r += 1) {
     const prev = rounds[r - 1];
     const curr = rounds[r];
+    if (!prev || !curr) continue;
     const prevGames = games.filter((game) => game.round === prev);
-    const count = prevGames.length / 2;
-    for (let slot = 0; slot < count; slot += 1) {
+    const nextCount = prevGames.length / 2;
+    for (let slot = 0; slot < nextCount; slot += 1) {
       const left = prevGames[slot * 2];
       const right = prevGames[slot * 2 + 1];
       if (!left || !right) continue;
@@ -196,7 +246,7 @@ export type GamePlacement = {
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
-  return h * 60 + m;
+  return (h ?? 0) * 60 + (m ?? 0);
 }
 
 function minutesToTime(total: number): string {
@@ -205,31 +255,76 @@ function minutesToTime(total: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-function daySlots(date: string, dates: string[]): string[] {
+export type PackRules = {
+  firstPitch?: string;
+  slotMinutes?: number;
+  lastStart?: string;
+  lastDayLastStart?: string;
+  championshipCollapse?: boolean;
+  packFillFields?: boolean;
+  packStayOnPark?: boolean;
+  fieldCount?: number;
+};
+
+type Clocks = {
+  firstPitch: string;
+  slotMinutes: number;
+  lastStart: string;
+  lastDayLastStart: string;
+  championshipCollapse: boolean;
+  packStayOnPark: boolean;
+};
+
+export function packContextFromRules(rules?: PackRules | null): Clocks {
+  return {
+    firstPitch: rules?.firstPitch || FIRST_PITCH,
+    slotMinutes: GAME_SLOT_MINUTES,
+    lastStart: rules?.lastStart || LAST_START,
+    lastDayLastStart: rules?.lastDayLastStart || LAST_DAY_LAST_START,
+    championshipCollapse: rules?.championshipCollapse !== false,
+    packStayOnPark: rules?.packStayOnPark !== false,
+  };
+}
+
+function daySlots(date: string, weekendDates: string[], clocks: Clocks): string[] {
   const slots: string[] = [];
-  let t = timeToMinutes(FIRST_PITCH);
-  const last = date === dates[dates.length - 1] ? timeToMinutes("22:00") : timeToMinutes(LAST_START);
+  let t = timeToMinutes(clocks.firstPitch);
+  const lastDay = weekendDates[weekendDates.length - 1];
+  const last = timeToMinutes(date === lastDay ? clocks.lastDayLastStart : clocks.lastStart);
+  const step = Math.max(15, clocks.slotMinutes);
   while (t <= last) {
     slots.push(minutesToTime(t));
-    t += GAME_SLOT_MINUTES;
+    t += step;
   }
   return slots;
 }
 
-function slotAfter(date: string, time: string, dates: string[]): { date: string; time: string } | null {
-  const slots = daySlots(date, dates);
-  const idx = slots.indexOf(time);
-  if (idx >= 0 && idx + 1 < slots.length) return { date, time: slots[idx + 1]! };
-  const later = dates.find((row) => row > date);
-  if (!later) return null;
-  return { date: later, time: FIRST_PITCH };
+/** Two-hour start blocks for one tournament day. The last day uses that day's cap. */
+export function startBlocks(date: string, dates: string[], rules?: PackRules | null): string[] {
+  if (!date) return [];
+  return daySlots(date, dates.length > 0 ? dates : [date], packContextFromRules(rules));
 }
 
-function notBefore(
+/** Next start strictly after a feeder, and only on a date in `allowed`. Never invents a day. */
+function openingAfter(
   date: string,
   time: string,
-  min: { date: string; time: string } | null,
-): boolean {
+  allowed: string[],
+  weekendDates: string[],
+  clocks: Clocks,
+): { date: string; time: string } | null {
+  if (allowed.includes(date)) {
+    const later = daySlots(date, weekendDates, clocks).find((slot) => slot > time);
+    if (later) return { date, time: later };
+  }
+  const next = weekendDates.find((row) => row > date && allowed.includes(row));
+  if (!next) return null;
+  const first = daySlots(next, weekendDates, clocks)[0];
+  if (!first) return null;
+  return { date: next, time: first };
+}
+
+function notBefore(date: string, time: string, min: { date: string; time: string } | null): boolean {
   if (!min) return true;
   if (date > min.date) return true;
   if (date < min.date) return false;
@@ -286,30 +381,30 @@ type GridGame = {
   awayFromSlot?: number | null;
 };
 
+function blankPlacement(game: { round: string; slot: number }): GamePlacement {
+  return { round: game.round, slot: game.slot, locationId: null, startDate: null, startTime: null };
+}
+
 /**
- * Fill free fields as soon as they open. Same-day park stickiness only —
- * yesterday’s field is not a reason to leave a diamond empty today.
+ * Fill free fields as soon as they open. Same-day park stickiness only.
+ * If a feeder has no later slot inside the allowed days, the game stays unscheduled.
  */
 function packGamesOnGrid(
   games: GridGame[],
   locations: LocationRef[],
-  dates: string[],
+  allowedDates: string[],
+  weekendDates: string[],
   occupied: Set<string>,
   confirmedMap: Map<string, number>,
   placed: Map<string, GamePlacement>,
   teamDayPark: Map<string, number>,
   collapse: boolean,
+  clocks: Clocks,
 ): GamePlacement[] {
   const fields = collapse ? locations.slice(0, 1) : locations;
   const out: GamePlacement[] = [];
-  if (fields.length === 0 || dates.length === 0) {
-    return games.map((game) => ({
-      round: game.round,
-      slot: game.slot,
-      locationId: null,
-      startDate: null,
-      startTime: null,
-    }));
+  if (fields.length === 0 || allowedDates.length === 0) {
+    return games.map(blankPlacement);
   }
 
   for (const game of games) {
@@ -317,76 +412,76 @@ function packGamesOnGrid(
     const pinned = confirmedId != null ? fields.filter((loc) => loc.id === confirmedId) : fields;
     const useFields = pinned.length > 0 ? pinned : fields;
     let minStart: { date: string; time: string } | null = null;
+    let blocked = false;
     for (const feeder of [
       game.homeFromRound != null && game.homeFromSlot != null
         ? placed.get(`${game.homeFromRound}:${game.homeFromSlot}`)
-        : null,
+        : undefined,
       game.awayFromRound != null && game.awayFromSlot != null
         ? placed.get(`${game.awayFromRound}:${game.awayFromSlot}`)
-        : null,
+        : undefined,
     ]) {
-      if (!feeder?.startDate || !feeder.startTime) continue;
-      const after = slotAfter(feeder.startDate, feeder.startTime, dates);
-      if (!after) continue;
+      if (feeder === undefined) continue;
+      if (!feeder?.startDate || !feeder.startTime) {
+        blocked = true;
+        break;
+      }
+      const after = openingAfter(feeder.startDate, feeder.startTime, allowedDates, weekendDates, clocks);
+      if (!after) {
+        blocked = true;
+        break;
+      }
       if (!minStart || after.date > minStart.date || (after.date === minStart.date && after.time > minStart.time)) {
         minStart = after;
       }
     }
     let chosen: GamePlacement | null = null;
-    outer: for (const date of dates) {
-      const prefer: number[] = [];
-      if (game.homeTeamId != null) {
-        const park = teamDayPark.get(`${game.homeTeamId}|${date}`);
-        if (park != null) prefer.push(park);
-      }
-      if (game.awayTeamId != null) {
-        const park = teamDayPark.get(`${game.awayTeamId}|${date}`);
-        if (park != null) prefer.push(park);
-      }
-      const homeFeeder =
-        game.homeFromRound != null && game.homeFromSlot != null
-          ? placed.get(`${game.homeFromRound}:${game.homeFromSlot}`)
-          : null;
-      const awayFeeder =
-        game.awayFromRound != null && game.awayFromSlot != null
-          ? placed.get(`${game.awayFromRound}:${game.awayFromSlot}`)
-          : null;
-      if (homeFeeder?.startDate === date && homeFeeder.locationId != null) prefer.push(homeFeeder.locationId);
-      if (awayFeeder?.startDate === date && awayFeeder.locationId != null) prefer.push(awayFeeder.locationId);
-
-      for (const time of daySlots(date, dates)) {
-        if (!notBefore(date, time, minStart)) continue;
-        const free = useFields.filter((loc) => !occupied.has(occKey(loc.id, date, time)));
-        if (free.length === 0) continue;
-        free.sort((a, b) => {
-          const ap = prefer.includes(a.id) ? 0 : 1;
-          const bp = prefer.includes(b.id) ? 0 : 1;
-          if (ap !== bp) return ap - bp;
-          return locLoad(occupied, a.id, date) - locLoad(occupied, b.id, date) || a.id - b.id;
-        });
-        const loc = free[0]!;
-        chosen = {
-          round: game.round,
-          slot: game.slot,
-          locationId: loc.id,
-          startDate: date,
-          startTime: time,
-        };
-        break outer;
+    if (!blocked) {
+      outer: for (const date of allowedDates) {
+        const prefer: number[] = [];
+        if (clocks.packStayOnPark) {
+          if (game.homeTeamId != null) {
+            const park = teamDayPark.get(`${game.homeTeamId}|${date}`);
+            if (park != null) prefer.push(park);
+          }
+          if (game.awayTeamId != null) {
+            const park = teamDayPark.get(`${game.awayTeamId}|${date}`);
+            if (park != null) prefer.push(park);
+          }
+          const homeFeeder =
+            game.homeFromRound != null && game.homeFromSlot != null
+              ? placed.get(`${game.homeFromRound}:${game.homeFromSlot}`)
+              : null;
+          const awayFeeder =
+            game.awayFromRound != null && game.awayFromSlot != null
+              ? placed.get(`${game.awayFromRound}:${game.awayFromSlot}`)
+              : null;
+          if (homeFeeder?.startDate === date && homeFeeder.locationId != null) prefer.push(homeFeeder.locationId);
+          if (awayFeeder?.startDate === date && awayFeeder.locationId != null) prefer.push(awayFeeder.locationId);
+        }
+        for (const time of daySlots(date, weekendDates, clocks)) {
+          if (!notBefore(date, time, minStart)) continue;
+          const free = useFields.filter((loc) => !occupied.has(occKey(loc.id, date, time)));
+          if (free.length === 0) continue;
+          free.sort((a, b) => {
+            const ap = prefer.includes(a.id) ? 0 : 1;
+            const bp = prefer.includes(b.id) ? 0 : 1;
+            if (ap !== bp) return ap - bp;
+            return locLoad(occupied, a.id, date) - locLoad(occupied, b.id, date) || a.id - b.id;
+          });
+          const loc = free[0]!;
+          chosen = {
+            round: game.round,
+            slot: game.slot,
+            locationId: loc.id,
+            startDate: date,
+            startTime: time,
+          };
+          break outer;
+        }
       }
     }
-    if (!chosen) {
-      const loc = useFields[0]!;
-      const date = dates[dates.length - 1]!;
-      const slots = daySlots(date, dates);
-      chosen = {
-        round: game.round,
-        slot: game.slot,
-        locationId: loc.id,
-        startDate: date,
-        startTime: slots[slots.length - 1] ?? LAST_START,
-      };
-    }
+    if (!chosen) chosen = blankPlacement(game);
     if (chosen.locationId != null && chosen.startDate && chosen.startTime) {
       occupied.add(occKey(chosen.locationId, chosen.startDate, chosen.startTime));
       rememberTeams(teamDayPark, chosen.startDate, chosen.locationId, game.homeTeamId, game.awayTeamId);
@@ -407,18 +502,31 @@ export type BuiltPoolGame = {
   awaySeed: number | null;
 };
 
-/** Keep a club on the field when we can so families are not sitting two hours. */
+/** Keep a club on the field, but never leave them sitting more than one game. */
 export function orderPoolGamesStayOn<T extends { homeTeamId: number; awayTeamId: number }>(games: T[]): T[] {
   if (games.length <= 1) return games.slice();
   const remaining = games.slice();
   const out: T[] = [];
+  const lastSeen = new Map<number, number>();
   out.push(remaining.shift()!);
+  for (const id of [out[0]!.homeTeamId, out[0]!.awayTeamId]) lastSeen.set(id, 0);
   while (remaining.length > 0) {
+    const forced = remaining.filter((game) =>
+      [game.homeTeamId, game.awayTeamId].some((id) => {
+        const seen = lastSeen.get(id);
+        return seen != null && out.length - seen > 1;
+      }),
+    );
     const last = out[out.length - 1]!;
     const hot = new Set([last.homeTeamId, last.awayTeamId]);
-    const idx = remaining.findIndex((game) => hot.has(game.homeTeamId) || hot.has(game.awayTeamId));
-    const next = idx >= 0 ? remaining.splice(idx, 1)[0]! : remaining.shift()!;
-    out.push(next);
+    const pool = forced.length > 0 ? forced : remaining;
+    const hotIdx = pool.findIndex((game) => hot.has(game.homeTeamId) || hot.has(game.awayTeamId));
+    const pick = hotIdx >= 0 ? pool[hotIdx]! : pool[0]!;
+    remaining.splice(remaining.indexOf(pick), 1);
+    for (const id of [pick.homeTeamId, pick.awayTeamId]) {
+      if (!lastSeen.has(id)) lastSeen.set(id, out.length);
+    }
+    out.push(pick);
   }
   return out;
 }
@@ -427,9 +535,11 @@ function packPoolBlocks(
   games: BuiltPoolGame[],
   locations: LocationRef[],
   dates: string[],
+  weekendDates: string[],
   confirmedMap: Map<string, number>,
   occupied: Set<string>,
   teamDayPark: Map<string, number>,
+  clocks: Clocks,
 ): GamePlacement[] {
   const out: GamePlacement[] = [];
   if (games.length === 0 || dates.length === 0 || locations.length === 0) return out;
@@ -462,13 +572,12 @@ function packPoolBlocks(
         const locked = parkOnDate.get(date);
         const locs = locked != null ? locations.filter((loc) => loc.id === locked) : locations;
         if (locs.length === 0) continue;
-        const slots = daySlots(date, dates);
+        const slots = daySlots(date, weekendDates, clocks);
         for (const loc of locs) {
           for (let count = remaining.length - i; count >= 1; count -= 1) {
             const block = consecutiveBlock(occupied, loc.id, date, count, slots);
             if (!block) continue;
-            const score =
-              -di * 10000 + count * 100 - locLoad(occupied, loc.id) + (loc.id === preferId ? 1 : 0);
+            const score = -di * 10000 + count * 100 - locLoad(occupied, loc.id) + (loc.id === preferId ? 1 : 0);
             if (!best || score > best.score) best = { loc, date, block, count, score };
             break;
           }
@@ -476,19 +585,7 @@ function packPoolBlocks(
       }
       if (!best) {
         const game = remaining[i]!;
-        const loc = locations[0]!;
-        const date = dates[dates.length - 1]!;
-        const time = daySlots(date, dates).at(-1) ?? LAST_START;
-        out.push({
-          round: game.round,
-          slot: game.slot,
-          locationId: loc.id,
-          startDate: date,
-          startTime: time,
-        });
-        occupied.add(occKey(loc.id, date, time));
-        rememberTeams(teamDayPark, date, loc.id, game.homeTeamId, game.awayTeamId);
-        parkOnDate.set(date, loc.id);
+        out.push(blankPlacement(game));
         i += 1;
         continue;
       }
@@ -512,6 +609,22 @@ function packPoolBlocks(
   return out;
 }
 
+function roundListFor(games: BuiltGame[]): RoundId[] {
+  return roundsForSize(
+    games.some((g) => g.round === "r64")
+      ? 64
+      : games.some((g) => g.round === "r32")
+        ? 32
+        : games.some((g) => g.round === "r16")
+          ? 16
+          : games.some((g) => g.round === "qf")
+            ? 8
+            : games.some((g) => g.round === "sf")
+              ? 4
+              : 2,
+  );
+}
+
 export function packSchedule(opts: {
   games: BuiltGame[];
   poolGames?: BuiltPoolGame[];
@@ -520,23 +633,19 @@ export function packSchedule(opts: {
   endDate: string;
   confirmed: { round: string; slot: number; locationId: number }[];
   dayPlan?: DayPlan[];
+  rules?: PackRules | null;
+  teamCount?: number;
 }): GamePlacement[] {
-  const roundList = roundsForSize(
-    opts.games.some((g) => g.round === "r64")
-      ? 64
-      : opts.games.some((g) => g.round === "r32")
-        ? 32
-        : opts.games.some((g) => g.round === "r16")
-          ? 16
-          : opts.games.some((g) => g.round === "qf")
-            ? 8
-            : opts.games.some((g) => g.round === "sf")
-              ? 4
-              : 2,
-  );
+  const clocks = packContextFromRules(opts.rules);
+  const cap =
+    opts.rules?.fieldCount && opts.rules.fieldCount > 0
+      ? opts.rules.fieldCount
+      : opts.teamCount && opts.teamCount > 0
+        ? fieldsNeeded(opts.teamCount)
+        : opts.locations.length;
+  const locations = opts.locations.slice(0, Math.max(0, cap));
+  const roundList = roundListFor(opts.games);
   const confirmedMap = new Map(opts.confirmed.map((row) => [`${row.round}:${row.slot}`, row.locationId]));
-  const locations = opts.locations;
-  const out: GamePlacement[] = [];
   const hasPoolGames = (opts.poolGames?.length ?? 0) > 0;
   const plan =
     opts.dayPlan && opts.dayPlan.length > 0
@@ -544,37 +653,46 @@ export function packSchedule(opts: {
       : hasPoolGames
         ? defaultDayPlan(opts.startDate, opts.endDate)
         : parseDayPlan([], opts.startDate, opts.endDate, false);
+  const weekendDates = plan.map((row) => row.date);
   const poolDates = plan.filter((row) => row.kind === "pool" || row.kind === "mixed").map((row) => row.date);
   const bracketDates = plan.filter((row) => row.kind === "bracket" || row.kind === "mixed").map((row) => row.date);
-  const lastDay = plan[plan.length - 1]?.date ?? opts.endDate;
+  const lastDay = weekendDates[weekendDates.length - 1] ?? opts.endDate;
   const bracketWindow = bracketDates.length > 0 ? bracketDates : [lastDay];
   const occupied = new Set<string>();
-  const placed = new Map<string, GamePlacement>();
   const teamDayPark = new Map<string, number>();
-
+  const out: GamePlacement[] = [];
   const pool = [...(opts.poolGames ?? [])].sort((a, b) => a.slot - b.slot);
   if (pool.length > 0 && poolDates.length > 0) {
-    out.push(...packPoolBlocks(pool, locations, poolDates, confirmedMap, occupied, teamDayPark));
+    out.push(...packPoolBlocks(pool, locations, poolDates, weekendDates, confirmedMap, occupied, teamDayPark, clocks));
   }
 
+  const placed = new Map<string, GamePlacement>();
   for (const round of roundList) {
-    const real = opts.games.filter((game) => game.round === round && !game.isBye);
+    const real = opts.games
+      .filter((game) => game.round === round && !game.isBye)
+      .slice()
+      .sort((a, b) => a.slot - b.slot);
     if (real.length === 0) continue;
-    const collapse = collapseToOneField(round, roundList);
+    const collapse = collapseToOneField(round, roundList, clocks.championshipCollapse);
     out.push(
-      ...packGamesOnGrid(real, locations, bracketWindow, occupied, confirmedMap, placed, teamDayPark, collapse),
+      ...packGamesOnGrid(
+        real,
+        locations,
+        bracketWindow,
+        weekendDates,
+        occupied,
+        confirmedMap,
+        placed,
+        teamDayPark,
+        collapse,
+        clocks,
+      ),
     );
   }
 
   for (const game of opts.games) {
     if (out.some((row) => row.round === game.round && row.slot === game.slot)) continue;
-    out.push({
-      round: game.round,
-      slot: game.slot,
-      locationId: null,
-      startDate: null,
-      startTime: null,
-    });
+    out.push(blankPlacement(game));
   }
   return out;
 }
@@ -697,6 +815,8 @@ export type SiteBracketSlot<T> = {
   rowSpan: number;
   arms: number;
   armSpans: number[];
+  cardAt?: number;
+  armAts?: number[];
 };
 
 export type SiteBracketLayout<T> = {
@@ -706,6 +826,20 @@ export type SiteBracketLayout<T> = {
 
 function roundSlotKey(round: string, slot: number): string {
   return `${round}:${slot}`;
+}
+
+/** Where a card sits in its slot, and where the two feeder lines meet it. */
+function slotAnchors(
+  rowStart: number,
+  rowSpan: number,
+  kids: { rowStart: number; rowSpan: number; cardAt: number }[],
+): { cardAt: number; armAts: number[] } {
+  if (kids.length === 0) return { cardAt: 0.5, armAts: [] };
+  const top = rowStart - 1;
+  const span = Math.max(1, rowSpan);
+  const armAts = kids.map((kid) => (kid.rowStart - 1 + kid.cardAt * kid.rowSpan - top) / span);
+  const cardAt = armAts.reduce((sum, at) => sum + at, 0) / armAts.length;
+  return { cardAt, armAts };
 }
 
 /**
@@ -736,6 +870,8 @@ export function layoutSiteBracket<T extends SiteBracketRef>(
     childKeys: string[];
     rowStart: number;
     rowSpan: number;
+    cardAt: number;
+    armAts: number[];
   };
   const nodes = new Map<string, Node>();
 
@@ -747,7 +883,7 @@ export function layoutSiteBracket<T extends SiteBracketRef>(
     }
     const game = byKey.get(key);
     if (!game) return null;
-    const node: Node = { key, game, ghost, childKeys: [], rowStart: 1, rowSpan: 1 };
+    const node: Node = { key, game, ghost, childKeys: [], rowStart: 1, rowSpan: 1, cardAt: 0.5, armAts: [] };
     nodes.set(key, node);
     return node;
   }
@@ -831,6 +967,16 @@ export function layoutSiteBracket<T extends SiteBracketRef>(
     rowCount = Math.max(rowCount, node.rowStart + node.rowSpan - 1);
   }
 
+  const anchored = [...nodes.values()].sort(
+    (a, b) => siteRoundOrder(a.game.round) - siteRoundOrder(b.game.round) || a.game.slot - b.game.slot,
+  );
+  for (const node of anchored) {
+    const kids = node.childKeys.map((child) => nodes.get(child)).filter((row): row is Node => Boolean(row));
+    const anchors = slotAnchors(node.rowStart, node.rowSpan, kids);
+    node.cardAt = anchors.cardAt;
+    node.armAts = anchors.armAts;
+  }
+
   const byRound = new Map<string, SiteBracketSlot<T>[]>();
   for (const node of nodes.values()) {
     const kids = node.childKeys.map((child) => nodes.get(child)).filter((row): row is Node => Boolean(row));
@@ -842,6 +988,8 @@ export function layoutSiteBracket<T extends SiteBracketRef>(
       rowSpan: node.rowSpan,
       arms: node.childKeys.length,
       armSpans: kids.map((kid) => kid.rowSpan),
+      cardAt: node.cardAt,
+      armAts: node.armAts,
     });
     byRound.set(node.game.round, list);
   }
@@ -919,6 +1067,8 @@ export function layoutPoolTree<
               rowSpan: 1,
               arms: 0,
               armSpans: [],
+              cardAt: 0.5,
+              armAts: [],
             },
           ],
         },
@@ -961,6 +1111,8 @@ export function layoutPoolTree<
     rowSpan: number;
     col: number;
     index: number;
+    cardAt: number;
+    armAts: number[];
   };
   const nodes = new Map<string, Node>();
   function cellKey(col: number, index: number): string {
@@ -983,6 +1135,8 @@ export function layoutPoolTree<
         rowSpan: 1,
         col: c,
         index: i,
+        cardAt: 0.5,
+        armAts: [],
       });
     }
   }
@@ -1011,6 +1165,14 @@ export function layoutPoolTree<
     if (node.col === lastCol) bubble(node.key);
   }
 
+  const poolAnchored = [...nodes.values()].sort((a, b) => a.col - b.col || a.index - b.index);
+  for (const node of poolAnchored) {
+    const kids = node.childKeys.map((child) => nodes.get(child)).filter((row): row is Node => Boolean(row));
+    const anchors = slotAnchors(node.rowStart, node.rowSpan, kids);
+    node.cardAt = anchors.cardAt;
+    node.armAts = anchors.armAts;
+  }
+
   let rowCount = 0;
   const rounds = cols.map((count, c) => {
     const slots: SiteBracketSlot<T>[] = [];
@@ -1026,6 +1188,8 @@ export function layoutPoolTree<
         rowSpan: node.rowSpan,
         arms: node.childKeys.length,
         armSpans: kids.map((kid) => kid.rowSpan),
+        cardAt: node.cardAt,
+        armAts: node.armAts,
       });
     }
     return {
@@ -1038,27 +1202,31 @@ export function layoutPoolTree<
 }
 
 export function numberPlayableGames(
-  games: { round: string; slot: number; isBye: boolean }[],
+  games: {
+    round: string;
+    slot: number;
+    isBye: boolean;
+    startDate?: string | null;
+    startTime?: string | null;
+    locationId?: number | null;
+  }[],
 ): Map<string, number> {
   const map = new Map<string, number>();
   let n = 0;
-  const pool = games
-    .filter((game) => game.round === POOL_ROUND && !game.isBye)
+  const ordered = games
+    .filter((game) => !game.isBye)
     .slice()
-    .sort((a, b) => a.slot - b.slot);
-  for (const game of pool) {
+    .sort(
+      (a, b) =>
+        (a.round === POOL_ROUND ? 0 : 1) - (b.round === POOL_ROUND ? 0 : 1) ||
+        (a.startDate ?? "").localeCompare(b.startDate ?? "") ||
+        (a.startTime ?? "").localeCompare(b.startTime ?? "") ||
+        ROUND_IDS.indexOf(a.round as RoundId) - ROUND_IDS.indexOf(b.round as RoundId) ||
+        a.slot - b.slot,
+    );
+  for (const game of ordered) {
     n += 1;
     map.set(`${game.round}:${game.slot}`, n);
-  }
-  for (const round of ROUND_IDS) {
-    const list = games
-      .filter((game) => game.round === round && !game.isBye)
-      .slice()
-      .sort((a, b) => a.slot - b.slot);
-    for (const game of list) {
-      n += 1;
-      map.set(`${game.round}:${game.slot}`, n);
-    }
   }
   return map;
 }
@@ -1102,38 +1270,30 @@ export function seedLabel(seed: number): string {
   return `${n}${suffix}`;
 }
 
-/** Prefer pools of 4, then 3. n=5 is one pool so everyone still plays twice. */
-export function poolSizes(n: number): number[] {
-  if (n < 2) return [];
-  if (n === 2) return [2];
-  if (n === 5) return [5];
-  const fours = Math.floor(n / 4);
-  const rem = n % 4;
-  if (rem === 0) return Array.from({ length: fours }, () => 4);
-  if (rem === 3) return [...Array.from({ length: fours }, () => 4), 3];
-  if (rem === 2) return [...Array.from({ length: fours - 1 }, () => 4), 3, 3];
-  return [...Array.from({ length: fours - 2 }, () => 4), 3, 3, 3];
+/** Pools of at most 7, split as evenly as possible. */
+export function fieldsNeeded(n: number): number {
+  if (n <= 0) return 0;
+  return Math.ceil(n / MAX_POOL_SIZE);
 }
 
-/** Index pairs inside a pool. Each team plays two except a leftover pair of 2. */
+export function poolSizes(n: number): number[] {
+  if (n < 2) return [];
+  const pools = Math.max(1, Math.ceil(n / MAX_POOL_SIZE));
+  const base = Math.floor(n / pools);
+  const extra = n % pools;
+  return Array.from({ length: pools }, (_, i) => base + (i < extra ? 1 : 0));
+}
+
+/** Two games each. Order keeps the rest between a team's games at 0 or 1. */
 export function poolPairings(size: number): [number, number][] {
   if (size <= 1) return [];
   if (size === 2) return [[0, 1]];
-  if (size === 3)
-    return [
-      [0, 1],
-      [0, 2],
-      [1, 2],
-    ];
-  if (size === 4)
-    return [
-      [0, 3],
-      [1, 2],
-      [0, 2],
-      [1, 3],
-    ];
-  const pairs: [number, number][] = [];
-  for (let i = 0; i < size; i += 1) pairs.push([i, (i + 1) % size]);
+  const pairs: [number, number][] = [
+    [0, 1],
+    [0, 2],
+  ];
+  for (let k = 1; k <= size - 3; k += 1) pairs.push([k, k + 2]);
+  pairs.push([size - 2, size - 1]);
   return pairs;
 }
 
@@ -1143,7 +1303,7 @@ export type BuiltPool = {
   games: BuiltPoolGame[];
 };
 
-export function buildPools(slots: SeedSlot[]): BuiltPool[] {
+export function buildPools(slots: SeedSlot[], _gamesPerTeam = POOL_GAMES_PER_TEAM): BuiltPool[] {
   const teams = slots
     .filter((row) => row.teamId != null)
     .sort((a, b) => a.seed - b.seed)
@@ -1178,4 +1338,369 @@ export function buildPools(slots: SeedSlot[]): BuiltPool[] {
     });
   }
   return pools;
+}
+
+export function divisionSlotOffset(divisionIndex: number): number {
+  return Math.max(0, Math.trunc(divisionIndex)) * 64;
+}
+
+/** Placeholder clubs until real teams fill the seed. Seed 1 is Team A. */
+export function fillerName(seed: number | null): string {
+  let n = Math.max(1, Math.trunc(seed ?? 1));
+  let label = "";
+  while (n > 0) {
+    n -= 1;
+    label = String.fromCharCode(65 + (n % 26)) + label;
+    n = Math.floor(n / 26);
+  }
+  return `Team ${label}`;
+}
+
+export type PoolGameResult = {
+  homeTeamId: number;
+  awayTeamId: number;
+  homeScore: number | null;
+  awayScore: number | null;
+  forfeit?: "home" | "away" | null;
+};
+
+export type PoolStanding = {
+  teamId: number;
+  place: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  rs: number;
+  ra: number;
+  rd: number;
+};
+
+function compareStandings(
+  a: PoolStanding,
+  b: PoolStanding,
+  tiebreakers: Tiebreaker[],
+  h2h: Map<string, number>,
+): number {
+  for (const key of tiebreakers) {
+    if (key === "record") {
+      const aw = a.wins - a.losses;
+      const bw = b.wins - b.losses;
+      if (aw !== bw) return bw - aw;
+    } else if (key === "runs-scored" && a.rs !== b.rs) return b.rs - a.rs;
+    else if (key === "run-diff" && a.rd !== b.rd) return b.rd - a.rd;
+    else if (key === "runs-allowed" && a.ra !== b.ra) return a.ra - b.ra;
+    else if (key === "head-to-head") {
+      const winner = h2h.get(`${a.teamId}:${b.teamId}`) ?? h2h.get(`${b.teamId}:${a.teamId}`);
+      if (winner === a.teamId) return -1;
+      if (winner === b.teamId) return 1;
+    }
+  }
+  return a.teamId - b.teamId;
+}
+
+export function poolStandings(teamIds: number[], games: PoolGameResult[], tiebreakers: Tiebreaker[]): PoolStanding[] {
+  const rows = new Map<number, PoolStanding>();
+  for (const id of teamIds) {
+    rows.set(id, { teamId: id, place: 0, wins: 0, losses: 0, ties: 0, rs: 0, ra: 0, rd: 0 });
+  }
+  const h2h = new Map<string, number>();
+  for (const game of games) {
+    const home = rows.get(game.homeTeamId);
+    const away = rows.get(game.awayTeamId);
+    if (!home || !away) continue;
+    const scored = game.homeScore != null && game.awayScore != null;
+    if (!game.forfeit && !scored) continue;
+    let homeWin = false;
+    let awayWin = false;
+    if (game.forfeit === "home") awayWin = true;
+    else if (game.forfeit === "away") homeWin = true;
+    else if ((game.homeScore ?? 0) > (game.awayScore ?? 0)) homeWin = true;
+    else if ((game.awayScore ?? 0) > (game.homeScore ?? 0)) awayWin = true;
+    if (homeWin) {
+      home.wins += 1;
+      away.losses += 1;
+      h2h.set(`${game.homeTeamId}:${game.awayTeamId}`, game.homeTeamId);
+    } else if (awayWin) {
+      away.wins += 1;
+      home.losses += 1;
+      h2h.set(`${game.homeTeamId}:${game.awayTeamId}`, game.awayTeamId);
+    } else {
+      home.ties += 1;
+      away.ties += 1;
+    }
+    if (!game.forfeit && scored) {
+      home.rs += game.homeScore ?? 0;
+      home.ra += game.awayScore ?? 0;
+      away.rs += game.awayScore ?? 0;
+      away.ra += game.homeScore ?? 0;
+    }
+  }
+  for (const row of rows.values()) row.rd = row.rs - row.ra;
+  const list = [...rows.values()].sort((a, b) => compareStandings(a, b, tiebreakers, h2h));
+  list.forEach((row, index) => {
+    row.place = index + 1;
+  });
+  return list;
+}
+
+export type SlotGame = {
+  id: number;
+  isBye?: boolean;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
+  homeScore: number | null;
+  awayScore: number | null;
+  forfeit?: "home" | "away" | null;
+  noContest?: boolean;
+};
+
+export type SlotPatch =
+  | { id: number; kind: "forfeit"; side: "home" | "away" }
+  | { id: number; kind: "no-contest" };
+
+/** Forfeit every remaining game for one club. A game both clubs left is a no-contest. */
+export function forfeitRemaining(games: SlotGame[], teamId: number): SlotPatch[] {
+  const out: SlotPatch[] = [];
+  for (const game of games) {
+    if (game.isBye) continue;
+    if (game.homeTeamId !== teamId && game.awayTeamId !== teamId) continue;
+    if (game.noContest) continue;
+    const played = !game.forfeit && game.homeScore != null && game.awayScore != null;
+    if (played) continue;
+    const side: "home" | "away" = game.homeTeamId === teamId ? "home" : "away";
+    if (game.forfeit === side) continue;
+    if (game.forfeit && game.forfeit !== side) {
+      out.push({ id: game.id, kind: "no-contest" });
+      continue;
+    }
+    out.push({ id: game.id, kind: "forfeit", side });
+  }
+  return out;
+}
+
+/** A place is locked only when no remaining result can move that team. */
+export function guaranteedPlaces(
+  teamIds: number[],
+  games: PoolGameResult[],
+  tiebreakers: Tiebreaker[],
+  _poolTies = true,
+): Map<number, number> {
+  const current = poolStandings(teamIds, games, tiebreakers);
+  const wins = new Map(current.map((row) => [row.teamId, row.wins]));
+  const left = new Map<number, number>();
+  for (const id of teamIds) left.set(id, 0);
+  for (const game of games) {
+    const open = !game.forfeit && (game.homeScore == null || game.awayScore == null);
+    if (!open) continue;
+    left.set(game.homeTeamId, (left.get(game.homeTeamId) ?? 0) + 1);
+    left.set(game.awayTeamId, (left.get(game.awayTeamId) ?? 0) + 1);
+  }
+  const locked = new Map<number, number>();
+  const best = (id: number) => (wins.get(id) ?? 0) + (left.get(id) ?? 0);
+  const worst = (id: number) => wins.get(id) ?? 0;
+  for (const id of teamIds) {
+    let minAhead = 0;
+    let maxAhead = 0;
+    for (const other of teamIds) {
+      if (other === id) continue;
+      if (worst(other) > best(id)) minAhead += 1;
+      if (best(other) >= worst(id)) maxAhead += 1;
+    }
+    if (minAhead === maxAhead) locked.set(id, minAhead + 1);
+  }
+  return locked;
+}
+
+export type ScheduleWarning = {
+  id: string;
+  text: string;
+  gameId?: number;
+  gameIds?: number[];
+};
+
+type WarnGame = {
+  id?: number;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
+  locationId?: number | null;
+  startDate?: string | null;
+  startTime?: string | null;
+};
+
+export function restGaps(games: { homeTeamId: number | null; awayTeamId: number | null }[]): Map<number, number> {
+  const first = new Map<number, number>();
+  const gaps = new Map<number, number>();
+  games.forEach((game, index) => {
+    for (const id of [game.homeTeamId, game.awayTeamId]) {
+      if (id == null) continue;
+      const prev = first.get(id);
+      if (prev == null) first.set(id, index);
+      else if (!gaps.has(id)) gaps.set(id, index - prev - 1);
+    }
+  });
+  return gaps;
+}
+
+export function collectScheduleWarnings(opts: {
+  teamIds: number[];
+  poolGamesPerTeam: number;
+  poolGames: WarnGame[];
+  teamNames?: Record<number, string>;
+  locationNames?: Record<number, string>;
+}): ScheduleWarning[] {
+  const warnings: ScheduleWarning[] = [];
+  const byTeam = new Map<number, WarnGame[]>();
+  for (const id of opts.teamIds) byTeam.set(id, []);
+  for (const game of opts.poolGames) {
+    for (const id of [game.homeTeamId, game.awayTeamId]) {
+      if (id == null || !byTeam.has(id)) continue;
+      byTeam.get(id)!.push(game);
+    }
+  }
+  for (const id of opts.teamIds) {
+    const list = byTeam.get(id) ?? [];
+    if (list.length >= opts.poolGamesPerTeam) continue;
+    const name = opts.teamNames?.[id] ?? `Team ${id}`;
+    const ids = list.map((game) => game.id).filter((gameId): gameId is number => gameId != null);
+    warnings.push({
+      id: `pool-${id}`,
+      text: `${name} has ${list.length}/${opts.poolGamesPerTeam} pool games`,
+      gameId: ids[0],
+      gameIds: ids,
+    });
+  }
+  const groups = new Map<string, WarnGame[]>();
+  for (const game of opts.poolGames) {
+    if (game.locationId == null || !game.startTime) continue;
+    const key = `${game.locationId}|${game.startDate ?? ""}`;
+    const list = groups.get(key) ?? [];
+    list.push(game);
+    groups.set(key, list);
+  }
+  for (const [key, list] of groups) {
+    const ordered = list.slice().sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? ""));
+    const gaps = restGaps(ordered);
+    for (const [teamId, gap] of gaps) {
+      if (gap <= 1 || !opts.teamIds.includes(teamId)) continue;
+      const mine = ordered.filter((game) => game.homeTeamId === teamId || game.awayTeamId === teamId);
+      const name = opts.teamNames?.[teamId] ?? `Team ${teamId}`;
+      const locId = Number(key.split("|")[0]);
+      const park = opts.locationNames?.[locId] ?? "the park";
+      const ids = mine.map((game) => game.id).filter((gameId): gameId is number => gameId != null);
+      warnings.push({
+        id: `gap-${teamId}`,
+        text: `${name} sits too long at ${park} between ${formatClock(mine[0]?.startTime ?? null)} and ${formatClock(mine[mine.length - 1]?.startTime ?? null)}.`,
+        gameId: ids[0],
+        gameIds: ids,
+      });
+    }
+  }
+  return warnings;
+}
+
+type PoolSwapGame = {
+  id: number;
+  homeTeamId: number;
+  awayTeamId: number;
+  homeSeed: number | null;
+  awaySeed: number | null;
+  poolIndex?: number;
+};
+
+export function applyPoolSlotSwap<T extends PoolSwapGame>(games: T[], teamA: number, teamB: number): T[] {
+  if (teamA === teamB) return games.map((game) => ({ ...game }));
+  const seedOf = new Map<number, number | null>();
+  for (const game of games) {
+    seedOf.set(game.homeTeamId, game.homeSeed);
+    seedOf.set(game.awayTeamId, game.awaySeed);
+  }
+  const seedA = seedOf.get(teamA) ?? null;
+  const seedB = seedOf.get(teamB) ?? null;
+  return games.map((game) => {
+    const next = { ...game };
+    if (next.homeTeamId === teamA) {
+      next.homeTeamId = teamB;
+      next.homeSeed = seedB;
+    } else if (next.homeTeamId === teamB) {
+      next.homeTeamId = teamA;
+      next.homeSeed = seedA;
+    }
+    if (next.awayTeamId === teamA) {
+      next.awayTeamId = teamB;
+      next.awaySeed = seedB;
+    } else if (next.awayTeamId === teamB) {
+      next.awayTeamId = teamA;
+      next.awaySeed = seedA;
+    }
+    return next;
+  });
+}
+
+export function applyPoolSideSwap<T extends PoolSwapGame>(
+  games: T[],
+  a: { gameId: number; side: "home" | "away" },
+  b: { gameId: number; side: "home" | "away" },
+): T[] {
+  const next = games.map((game) => ({ ...game }));
+  const left = next.find((game) => game.id === a.gameId);
+  const right = next.find((game) => game.id === b.gameId);
+  if (!left || !right) return next;
+  if ((left.poolIndex ?? 0) !== (right.poolIndex ?? 0)) throw new Error("Teams have to stay in the same pool.");
+  const read = (game: T, side: "home" | "away") =>
+    side === "home" ? { teamId: game.homeTeamId, seed: game.homeSeed } : { teamId: game.awayTeamId, seed: game.awaySeed };
+  const write = (game: T, side: "home" | "away", value: { teamId: number; seed: number | null }) => {
+    if (side === "home") {
+      game.homeTeamId = value.teamId;
+      game.homeSeed = value.seed;
+    } else {
+      game.awayTeamId = value.teamId;
+      game.awaySeed = value.seed;
+    }
+  };
+  const hold = read(left, a.side);
+  write(left, a.side, read(right, b.side));
+  write(right, b.side, hold);
+  if (left.homeTeamId === left.awayTeamId || right.homeTeamId === right.awayTeamId) {
+    throw new Error("A team cannot play itself.");
+  }
+  return next;
+}
+
+export type RainoutOption = {
+  date: string;
+  time: string;
+  locationId: number;
+  label: string;
+};
+
+export function proposeRainoutSlots(opts: {
+  occupied: { locationId: number | null; date: string; time: string }[];
+  locationId: number | null;
+  locations: { id: number; name?: string }[];
+  dates: string[];
+  rules?: PackRules | null;
+}): RainoutOption[] {
+  const clocks = packContextFromRules(opts.rules);
+  const taken = new Set(opts.occupied.map((row) => `${row.locationId}|${row.date}|${row.time}`));
+  const locs = opts.locations.slice().sort((a, b) => {
+    if (a.id === opts.locationId) return -1;
+    if (b.id === opts.locationId) return 1;
+    return a.id - b.id;
+  });
+  const out: RainoutOption[] = [];
+  for (const date of opts.dates) {
+    for (const time of daySlots(date, opts.dates, clocks)) {
+      for (const loc of locs) {
+        if (taken.has(`${loc.id}|${date}|${time}`)) continue;
+        out.push({
+          date,
+          time,
+          locationId: loc.id,
+          label: `${formatClock(time)}`,
+        });
+        if (out.length >= 8) return out;
+      }
+    }
+  }
+  return out;
 }

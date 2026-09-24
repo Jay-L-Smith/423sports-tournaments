@@ -8,12 +8,12 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-fg shadow-[0_0_16px_rgb(238_184_47_/_0.28)] hover:bg-primary/90",
-        pine: "bg-primary text-primary-fg shadow-[0_0_16px_rgb(238_184_47_/_0.28)] hover:bg-primary/90",
+          "rounded-full bg-primary text-primary-fg shadow-none hover:bg-primary/90",
+        pine: "rounded-full bg-primary text-primary-fg shadow-none hover:bg-primary/90",
         outline:
-          "border-2 border-fg bg-transparent text-fg shadow-[0_0_10px_rgb(247_242_242_/_0.22)] hover:bg-fg hover:text-bg",
-        ghost: "text-fg hover:bg-fg/10",
-        danger: "border-2 border-fg bg-transparent text-fg hover:bg-fg hover:text-bg",
+          "rounded-full border border-line bg-white text-fg hover:bg-fg/5",
+        ghost: "text-fg hover:bg-fg/5",
+        danger: "rounded-full border border-line bg-white text-fg hover:bg-warn-bg",
       },
       size: {
         default: "min-h-11",

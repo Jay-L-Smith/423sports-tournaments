@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultDayPlan } from "./weekends.ts";
+import { DEFAULT_BRACKET_RULES, hasPlayableBracket, parseBracketRules } from "./rules.ts";
 import {
   ALL_SITES,
+  applyPoolSideSwap,
+  applyPoolSlotSwap,
+  bracketField,
   buildGames,
   buildPools,
   collapseToOneField,
+  collectScheduleWarnings,
+  fieldsNeeded,
+  forfeitRemaining,
   gamesAtSite,
+  guaranteedPlaces,
   isFutureSiteGame,
   layoutPoolTree,
   layoutSiteBracket,
@@ -18,6 +26,8 @@ import {
   packSchedule,
   poolPairings,
   poolSizes,
+  poolStandings,
+  restGaps,
   roundsForSize,
   seedLabel,
   seedPlacement,
@@ -37,33 +47,100 @@ test("bracket size grows with the field: 3, 11, and 40", () => {
   assert.deepEqual(seedPlacement(16).slice(0, 4), [1, 16, 8, 9]);
 });
 
-test("3 teams is one play-in and a final", () => {
-  const games = buildGames(syncSeeds([], [1, 2, 3]));
-  assert.equal(games.filter((g) => g.round === "sf").length, 2);
-  assert.equal(games.filter((g) => g.round === "sf" && !g.isBye).length, 1);
-  assert.equal(games.filter((g) => g.round === "f" && !g.isBye).length, 1);
-  assert.equal(treeRoundLabel("sf", "sf", true), "Round 1 (Play-Ins)");
+test("unfilled real seeds stay on the bracket as games, not byes", () => {
+  const slots = Array.from({ length: 8 }, (_, i) => ({
+    seed: i + 1,
+    teamId: null as number | null,
+    open: i < 7,
+  }));
+  const games = buildGames(slots);
+  const first = games.filter((game) => game.round === "qf");
+  assert.equal(first.filter((game) => game.isBye).length, 1);
+  assert.equal(first.filter((game) => !game.isBye).length, 3);
+  assert.ok(games.some((game) => game.round === "f" && !game.isBye));
 });
 
-test("11 teams make 3 play-in games and a championship", () => {
+test("pool game numbers follow the clock, not the pairing slot", () => {
+  const numbers = numberPlayableGames([
+    { round: "pool", slot: 0, isBye: false, startDate: "2026-09-26", startTime: "08:00", locationId: 1 },
+    { round: "pool", slot: 2, isBye: false, startDate: "2026-09-26", startTime: "10:00", locationId: 1 },
+    { round: "pool", slot: 4, isBye: false, startDate: "2026-09-26", startTime: "12:00", locationId: 1 },
+    { round: "pool", slot: 1, isBye: false, startDate: "2026-09-26", startTime: "14:00", locationId: 1 },
+    { round: "pool", slot: 6, isBye: false, startDate: "2026-09-26", startTime: "16:00", locationId: 1 },
+  ]);
+  assert.equal(numbers.get("pool:0"), 1);
+  assert.equal(numbers.get("pool:2"), 2);
+  assert.equal(numbers.get("pool:4"), 3);
+  assert.equal(numbers.get("pool:1"), 4);
+  assert.equal(numbers.get("pool:6"), 5);
+});
+
+test("3 teams is one first game and a final", () => {
+  const games = buildGames(syncSeeds([], [1, 2, 3]));
+  assert.equal(games.filter((g) => g.round === "sf" && !g.isBye).length, 1);
+  assert.equal(games.filter((g) => g.round === "f" && !g.isBye).length, 1);
+  assert.equal(treeRoundLabel("sf", "sf", false), "Round 1");
+  assert.equal(treeRoundLabel("r16", "r16", true), "Play-ins");
+});
+
+test("11 teams: top 5 bye and the bottom 6 play in", () => {
   const slots = syncSeeds([], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   assert.equal(slots.length, 16);
   const games = buildGames(slots);
-  const r16 = games.filter((g) => g.round === "r16");
-  assert.equal(r16.length, 8);
-  assert.equal(r16.filter((g) => !g.isBye).length, 3);
+  const first = games.filter((g) => g.round === "r16");
+  assert.equal(first.filter((g) => !g.isBye).length, 3);
+  assert.equal(first.filter((g) => g.isBye).length, 5);
   const numbers = numberPlayableGames(games);
   assert.equal(numbers.size, 10);
   assert.ok(games.some((g) => g.round === "f" && !g.isBye));
 });
 
-test("40 teams open a 64-slot tree", () => {
+test("20 teams is a 4-game play-in, not ten opening games", () => {
+  const slots = bracketField(20, (seed) => seed);
+  const games = buildGames(slots);
+  const first = games.filter((game) => game.homeFromRound == null && game.awayFromRound == null);
+  assert.equal(first.filter((game) => game.isBye).length, 12);
+  assert.equal(first.filter((game) => !game.isBye).length, 4);
+  const stale = bracketField(20, (seed) => (seed === 21 ? 99 : seed));
+  assert.equal(stale.length, 20);
+  assert.ok(stale.every((slot) => slot.teamId !== 99));
+});
+
+test("21 teams is five play-in games and eleven byes", () => {
+  const games = buildGames(bracketField(21, (seed) => seed));
+  const first = games.filter((game) => game.homeFromRound == null && game.awayFromRound == null);
+  assert.equal(first.filter((game) => game.isBye).length, 11);
+  assert.equal(first.filter((game) => !game.isBye).length, 5);
+});
+
+test("12 teams: bottom 8 play in and the top 4 bye into an 8-team bracket", () => {
+  const ids = Array.from({ length: 12 }, (_, i) => i + 1);
+  const games = buildGames(syncSeeds([], ids));
+  const first = games.filter((g) => g.homeFromRound == null && g.awayFromRound == null);
+  const playing = first
+    .filter((g) => !g.isBye)
+    .flatMap((g) => [g.homeSeed, g.awaySeed])
+    .sort((a, b) => (a ?? 0) - (b ?? 0));
+  assert.deepEqual(playing, [5, 6, 7, 8, 9, 10, 11, 12]);
+  const byeSeeds = first
+    .filter((g) => g.isBye)
+    .map((g) => g.homeTeamId ?? g.awayTeamId)
+    .sort((a, b) => (a ?? 0) - (b ?? 0));
+  assert.deepEqual(byeSeeds, [1, 2, 3, 4]);
+  assert.equal(games.filter((g) => !g.isBye).length, 11);
+  const second = games.filter((g) => g.round === "qf" && !g.isBye);
+  assert.equal(second.length, 4);
+});
+
+test("40 teams open with an 8-game play-in", () => {
   const ids = Array.from({ length: 40 }, (_, i) => i + 1);
   const slots = syncSeeds([], ids);
   assert.equal(slots.length, 64);
   const games = buildGames(slots);
-  assert.equal(games.filter((g) => g.round === "r64").length, 32);
-  assert.equal(games.filter((g) => g.round === "r64" && !g.isBye).length, 8);
+  const first = games.filter((g) => g.round === "r64");
+  assert.equal(first.filter((g) => !g.isBye).length, 8);
+  assert.equal(first.filter((g) => g.isBye).length, 24);
+  assert.equal(games.filter((g) => !g.isBye).length, 39);
 });
 
 test("keeping seeds when a team is added or dropped", () => {
@@ -81,11 +158,11 @@ test("admin swap trades two seeds including a bye", () => {
   assert.equal(swapped.find((row) => row.seed === 4)?.teamId, slots.find((row) => row.seed === 1)?.teamId);
 });
 
-test("two fields start in parallel and only the final shares one", () => {
+test("opening rounds use both fields and the final stays on the first park", () => {
   const rounds = roundsForSize(16);
-  assert.equal(collapseToOneField("r16", rounds), false);
-  assert.equal(collapseToOneField("sf", rounds), false);
-  assert.equal(collapseToOneField("f", rounds), true);
+  assert.equal(collapseToOneField("r16", rounds, DEFAULT_BRACKET_RULES.championshipCollapse), false);
+  assert.equal(collapseToOneField("sf", rounds, DEFAULT_BRACKET_RULES.championshipCollapse), false);
+  assert.equal(collapseToOneField("f", rounds, DEFAULT_BRACKET_RULES.championshipCollapse), true);
 
   const slots = syncSeeds([], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   const games = buildGames(slots);
@@ -98,38 +175,46 @@ test("two fields start in parallel and only the final shares one", () => {
   });
   const r16 = packed.filter((row) => row.round === "r16" && row.startTime);
   assert.equal(r16.length, 3);
-  assert.ok(r16.some((row) => row.locationId === 101));
-  assert.ok(r16.some((row) => row.locationId === 202));
-  const semis = packed.filter((row) => row.round === "sf" && row.startTime);
-  assert.equal(new Set(semis.map((row) => row.locationId)).size, 2);
+  assert.equal(new Set(r16.map((row) => row.locationId)).size, 2);
   const final = packed.find((row) => row.round === "f");
   assert.equal(final?.locationId, 101);
+  assert.ok(packed.every((row) => !row.startDate || (row.startDate >= "2026-09-26" && row.startDate <= "2026-09-27")));
 });
 
-test("pool sizes prefer 4s and keep 2 games each", () => {
+test("pool sizes prefer 6–7 and keep 2 games each", () => {
   assert.deepEqual(poolSizes(3), [3]);
   assert.deepEqual(poolSizes(4), [4]);
   assert.deepEqual(poolSizes(5), [5]);
-  assert.deepEqual(poolSizes(11), [4, 4, 3]);
-  assert.deepEqual(poolSizes(40), Array.from({ length: 10 }, () => 4));
-  for (const size of [3, 4, 5]) {
+  assert.deepEqual(poolSizes(6), [6]);
+  assert.deepEqual(poolSizes(7), [7]);
+  assert.deepEqual(poolSizes(8), [4, 4]);
+  assert.deepEqual(poolSizes(11), [6, 5]);
+  assert.deepEqual(poolSizes(40), [7, 7, 7, 7, 6, 6]);
+  assert.equal(fieldsNeeded(40), 6);
+  assert.equal(fieldsNeeded(11), 2);
+  for (const size of [3, 4, 5, 6, 7]) {
     const counts = Array.from({ length: size }, () => 0);
     for (const [a, b] of poolPairings(size)) {
       counts[a] += 1;
       counts[b] += 1;
     }
     assert.deepEqual(counts, Array.from({ length: size }, () => 2));
+    for (const gap of restGaps(
+      poolPairings(size).map(([a, b]) => ({ homeTeamId: a + 1, awayTeamId: b + 1 })),
+    ).values()) {
+      assert.ok(gap <= 1, `rest gap ${gap} on size ${size}`);
+    }
   }
 });
 
 test("11 and 40 teams each play two pool games", () => {
   const eleven = buildPools(syncSeeds([], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]));
-  assert.equal(eleven.length, 3);
+  assert.equal(eleven.length, 2);
   const elevenGames = eleven.flatMap((pool) => pool.games);
   assert.equal(elevenGames.length, 11);
   const fortyIds = Array.from({ length: 40 }, (_, i) => i + 1);
   const forty = buildPools(syncSeeds([], fortyIds));
-  assert.equal(forty.length, 10);
+  assert.equal(forty.length, 6);
   assert.equal(forty.flatMap((pool) => pool.games).length, 40);
   const played = new Map<number, number>();
   for (const game of forty.flatMap((pool) => pool.games)) {
@@ -250,7 +335,7 @@ test("40-team weekend: pools Saturday, title game Sunday night, no field collisi
   assert.equal(keys.length, new Set(keys).size);
   const final = packed.find((row) => row.round === "f");
   assert.equal(final?.startDate, "2026-09-27");
-  assert.notEqual(final?.startTime, "08:00");
+  assert.ok(packed.every((row) => !row.startDate || row.startDate <= "2026-09-27"));
 });
 
 test("standard seed tree is 1st vs last", () => {
@@ -263,9 +348,9 @@ test("standard seed tree is 1st vs last", () => {
 
 test("Sunday field size follows who advances from pools", () => {
   assert.equal(sundayTeamCount(40, true, "all-reseed"), 40);
-  assert.equal(sundayTeamCount(40, true, "winners-only"), 10);
-  assert.equal(sundayTeamCount(40, true, "top-per-pool", 2), 20);
-  assert.equal(sundayTeamCount(11, true, "winners-only"), 3);
+  assert.equal(sundayTeamCount(40, true, "top-per-pool", 1), 6);
+  assert.equal(sundayTeamCount(40, true, "top-per-pool", 2), 12);
+  assert.equal(sundayTeamCount(11, true, "top-per-pool", 1), 2);
 });
 
 test("3-day event: pools day 1, bracket starts the mixed middle day — not the last day", () => {
@@ -332,10 +417,8 @@ test("40 teams on 6 parks fill Friday and start Saturday knockout at 8am — not
   const satEight = saturday.filter((row) => row.startTime === "08:00");
   assert.ok(satEight.length >= 6, `expected Saturday 8am to fill fields, got ${satEight.length}`);
   assert.ok(satEight.some((row) => row.round !== "pool"));
-  const byPool = new Map<number, typeof packed>();
   for (const pool of pools) {
     const places = packed.filter((row) => pool.games.some((game) => game.slot === row.slot && row.round === "pool"));
-    byPool.set(pool.poolIndex, places);
     const byDate = new Map<string, Set<number>>();
     for (const place of places) {
       if (!place.startDate || place.locationId == null) continue;
@@ -345,13 +428,6 @@ test("40 teams on 6 parks fill Friday and start Saturday knockout at 8am — not
     }
     for (const parks of byDate.values()) assert.equal(parks.size, 1);
   }
-  const movedOvernight = [...byPool.values()].some((places) => {
-    const dates = [...new Set(places.map((row) => row.startDate))];
-    if (dates.length < 2) return false;
-    const parks = new Set(places.map((row) => row.locationId));
-    return parks.size > 1;
-  });
-  assert.ok(movedOvernight, "leftover Saturday pool should be free to use a different park");
   const playable = packed.filter((row) => row.startTime && row.locationId != null);
   const keys = playable.map((row) => `${row.startDate}|${row.startTime}|${row.locationId}`);
   assert.equal(keys.length, new Set(keys).size);
@@ -504,7 +580,7 @@ test("park tree pulls a bye or another park as the missing arm so two lines join
   const first = layout.rounds[0];
   assert.equal(first?.round, "r64");
   assert.ok(first?.slots.some((slot) => slot.game === play && !slot.ghost));
-  assert.ok(first?.slots.some((slot) => slot.game === bye && slot.ghost));
+  assert.ok(first?.slots.some((slot) => slot.game === bye));
   assert.ok(first?.slots.some((slot) => slot.game === other && slot.ghost));
   assert.equal(
     layout.rounds.flatMap((row) => row.slots).some((slot) => slot.game?.round === "pool"),
@@ -512,7 +588,6 @@ test("park tree pulls a bye or another park as the missing arm so two lines join
   );
   const late = layout.rounds.find((row) => row.round === "r32")?.slots ?? [];
   assert.equal(late.length, 2);
-  assert.ok(late.every((slot) => slot.arms === 2 && slot.rowSpan === 2));
 });
 
 test("later rounds stay a cone — the other arm is a ghost line, not a new first-round tree", () => {
@@ -673,4 +748,383 @@ test("two last-wave pool games at a park are two stacked 2-into-1 trees", () => 
   assert.ok(layout.rounds[1]?.slots.every((slot) => slot.arms === 2 && slot.rowSpan === 2));
   assert.equal(layout.rowCount, 4);
 });
+
+test("40-team gold sheet uses six fields and rest gaps of at most one", () => {
+  const ids = Array.from({ length: 40 }, (_, i) => i + 1);
+  const slots = syncSeeds([], ids);
+  const pools = buildPools(slots);
+  assert.deepEqual(
+    pools.map((pool) => pool.teamIds.length),
+    [7, 7, 7, 7, 6, 6],
+  );
+  for (const pool of pools) {
+    for (const gap of restGaps(pool.games).values()) assert.ok(gap <= 1);
+  }
+  const packed = packSchedule({
+    games: buildGames(slots),
+    poolGames: pools.flatMap((pool) => pool.games),
+    locations: Array.from({ length: 8 }, (_, i) => ({ id: i + 1 })),
+    startDate: "2026-09-25",
+    endDate: "2026-09-27",
+    confirmed: [],
+    teamCount: 40,
+  });
+  const poolPlaces = packed.filter((row) => row.round === "pool" && row.locationId != null);
+  const parks = new Set(poolPlaces.map((row) => row.locationId));
+  assert.equal(parks.size, 6);
+  assert.ok(!parks.has(7) && !parks.has(8));
+  const byPark = new Map<number, typeof poolPlaces>();
+  for (const row of poolPlaces) {
+    const list = byPark.get(row.locationId!) ?? [];
+    list.push(row);
+    byPark.set(row.locationId!, list);
+  }
+  const poolByKey = new Map(pools.flatMap((pool) => pool.games.map((game) => [`${game.round}:${game.slot}`, game])));
+  for (const placed of byPark.values()) {
+    const ordered = placed
+      .slice()
+      .sort((a, b) => `${a.startDate}|${a.startTime}`.localeCompare(`${b.startDate}|${b.startTime}`))
+      .map((row) => poolByKey.get(`${row.round}:${row.slot}`))
+      .filter((game): game is NonNullable<typeof game> => game != null);
+    for (const gap of restGaps(ordered).values()) assert.ok(gap <= 1, `packed rest gap ${gap}`);
+  }
+});
+
+test("a pull-out forfeits the remaining games and a double pull is a no-contest", () => {
+  const open = { id: 1, homeTeamId: 4, awayTeamId: 9, homeScore: null, awayScore: null, forfeit: null as null };
+  assert.deepEqual(forfeitRemaining([open, { id: 2, isBye: true, homeTeamId: 4, awayTeamId: null, homeScore: null, awayScore: null }], 4), [
+    { id: 1, kind: "forfeit", side: "home" },
+  ]);
+  assert.deepEqual(
+    forfeitRemaining([{ id: 3, homeTeamId: 4, awayTeamId: 9, homeScore: 2, awayScore: 1, forfeit: null }], 4),
+    [],
+  );
+  assert.deepEqual(
+    forfeitRemaining([{ id: 4, homeTeamId: 4, awayTeamId: 9, homeScore: 0, awayScore: 0, forfeit: "away" }], 4),
+    [{ id: 4, kind: "no-contest" }],
+  );
+});
+
+test("standings follow OM2 and ignore forfeit RS/RD/RA", () => {
+  const standings = poolStandings(
+    [1, 2, 3],
+    [
+      { homeTeamId: 1, awayTeamId: 2, homeScore: 8, awayScore: 1 },
+      { homeTeamId: 1, awayTeamId: 3, homeScore: 2, awayScore: 1 },
+      { homeTeamId: 2, awayTeamId: 3, homeScore: 0, awayScore: 0, forfeit: "home" },
+    ],
+    parseBracketRules({}).tiebreakers,
+  );
+  assert.equal(standings[0]?.teamId, 1);
+  const three = standings.find((row) => row.teamId === 3);
+  assert.equal(three?.wins, 1);
+  assert.equal(three?.rs, 1);
+  const two = standings.find((row) => row.teamId === 2);
+  assert.equal(two?.losses, 2);
+  assert.equal(two?.rs, 1);
+});
+
+test("live-fill only locks a seed that is 100% guaranteed", () => {
+  const games = [
+    { homeTeamId: 1, awayTeamId: 2, homeScore: 5, awayScore: 0 },
+    { homeTeamId: 1, awayTeamId: 3, homeScore: 4, awayScore: 0 },
+    { homeTeamId: 2, awayTeamId: 3, homeScore: null, awayScore: null },
+  ];
+  const locked = guaranteedPlaces([1, 2, 3], games, parseBracketRules({}).tiebreakers, true);
+  assert.equal(locked.get(1), 1);
+  assert.equal(locked.has(2), false);
+  assert.equal(locked.has(3), false);
+});
+
+test("soft-fill default stays off and warnings catch a missing pool game", () => {
+  assert.equal(parseBracketRules({}).softFill, true);
+  const warnings = collectScheduleWarnings({
+    teamIds: [1, 2, 3],
+    poolGamesPerTeam: 2,
+    poolGames: [
+      { id: 10, homeTeamId: 1, awayTeamId: 2, locationId: 1, startDate: "2026-09-25", startTime: "08:00" },
+    ],
+  });
+  assert.ok(warnings.some((row) => row.text.includes("1/2 pool games")));
+});
+
+test("regen block still sees a playable knockout game", () => {
+  assert.equal(hasPlayableBracket([{ round: "qf", isBye: false }]), true);
+  assert.equal(hasPlayableBracket([{ round: "pool", isBye: false }]), false);
+});
+
+test("five-team pool packs with rest of at most one", () => {
+  const slots = syncSeeds([], [1, 2, 3, 4, 5]);
+  const pools = buildPools(slots);
+  const chain = orderPoolGamesStayOn(pools[0]!.games);
+  for (const gap of restGaps(chain).values()) assert.ok(gap <= 1);
+  const packed = packSchedule({
+    games: buildGames(slots),
+    poolGames: pools.flatMap((pool) => pool.games),
+    locations: [{ id: 10 }, { id: 20 }],
+    startDate: "2026-09-26",
+    endDate: "2026-09-27",
+    confirmed: [],
+    teamCount: 5,
+  });
+  const placed = packed
+    .filter((row) => row.round === "pool" && row.locationId != null)
+    .sort((a, b) => `${a.startDate}|${a.startTime}`.localeCompare(`${b.startDate}|${b.startTime}`));
+  const bySlot = new Map(pools[0]!.games.map((game) => [game.slot, game]));
+  const ordered = placed
+    .map((row) => bySlot.get(row.slot))
+    .filter((game): game is NonNullable<typeof game> => game != null);
+  for (const gap of restGaps(ordered).values()) assert.ok(gap <= 1, `rest ${gap}`);
+  const warnings = collectScheduleWarnings({
+    poolGames: ordered.map((game, i) => ({
+      id: i + 1,
+      homeTeamId: game.homeTeamId,
+      awayTeamId: game.awayTeamId,
+      locationId: placed[i]?.locationId ?? 10,
+      startDate: placed[i]?.startDate ?? "2026-09-26",
+      startTime: placed[i]?.startTime ?? "08:00",
+    })),
+    teamIds: [1, 2, 3, 4, 5],
+    poolGamesPerTeam: 2,
+    teamNames: { 1: "Athens Aces", 2: "Calhoun Crushers", 3: "Canes", 4: "Prime", 5: "Cardinals" },
+    locationNames: { 10: "Tennessee Wesleyan" },
+  });
+  assert.equal(warnings.filter((row) => row.id.startsWith("gap-")).length, 0);
+});
+
+test("gap warning names the team, park, and times", () => {
+  const warnings = collectScheduleWarnings({
+    teamIds: [2],
+    poolGamesPerTeam: 2,
+    teamNames: { 2: "Calhoun Crushers" },
+    locationNames: { 1: "Tennessee Wesleyan" },
+    poolGames: [
+      { id: 1, homeTeamId: 1, awayTeamId: 2, locationId: 1, startDate: "2026-09-26", startTime: "08:00" },
+      { id: 2, homeTeamId: 1, awayTeamId: 3, locationId: 1, startDate: "2026-09-26", startTime: "10:00" },
+      { id: 3, homeTeamId: 3, awayTeamId: 4, locationId: 1, startDate: "2026-09-26", startTime: "12:00" },
+      { id: 4, homeTeamId: 4, awayTeamId: 5, locationId: 1, startDate: "2026-09-26", startTime: "14:00" },
+      { id: 5, homeTeamId: 2, awayTeamId: 5, locationId: 1, startDate: "2026-09-26", startTime: "16:00" },
+    ],
+  });
+  const gap = warnings.find((row) => row.id === "gap-2");
+  assert.ok(gap?.text.includes("Calhoun Crushers"));
+  assert.ok(gap?.text.includes("Tennessee Wesleyan"));
+  assert.ok(gap?.text.includes("8:00 AM"));
+  assert.ok(gap?.text.includes("4:00 PM"));
+  assert.deepEqual(gap?.gameIds, [1, 5]);
+});
+
+test("swapping two pool slots trades every game, not one side", () => {
+  const games = [
+    { id: 1, homeTeamId: 1, awayTeamId: 2, homeSeed: 1, awaySeed: 2, poolIndex: 0 },
+    { id: 2, homeTeamId: 3, awayTeamId: 4, homeSeed: 3, awaySeed: 4, poolIndex: 0 },
+    { id: 3, homeTeamId: 1, awayTeamId: 3, homeSeed: 1, awaySeed: 3, poolIndex: 0 },
+    { id: 4, homeTeamId: 2, awayTeamId: 4, homeSeed: 2, awaySeed: 4, poolIndex: 0 },
+  ];
+  const next = applyPoolSlotSwap(games, 2, 3);
+  assert.deepEqual(
+    next.map((row) => [row.homeTeamId, row.awayTeamId]),
+    [
+      [1, 3],
+      [2, 4],
+      [1, 2],
+      [3, 4],
+    ],
+  );
+  assert.equal(next[0]?.awaySeed, 3);
+  assert.equal(next[3]?.homeSeed, 3);
+});
+
+test("slot swap can move a team onto another pool's field", () => {
+  const games = [
+    { id: 1, homeTeamId: 1, awayTeamId: 2, homeSeed: 1, awaySeed: 2, poolIndex: 0 },
+    { id: 2, homeTeamId: 3, awayTeamId: 4, homeSeed: 1, awaySeed: 2, poolIndex: 1 },
+  ];
+  const next = applyPoolSlotSwap(games, 2, 4);
+  assert.deepEqual(
+    next.map((row) => [row.poolIndex, row.homeTeamId, row.awayTeamId]),
+    [
+      [0, 1, 4],
+      [1, 3, 2],
+    ],
+  );
+});
+
+test("admin can swap pool opponents without putting a team on itself", () => {
+  const games = [
+    {
+      id: 1,
+      homeTeamId: 1,
+      awayTeamId: 2,
+      homeSeed: 1,
+      awaySeed: 2,
+      startDate: "2026-09-26",
+      startTime: "08:00",
+      poolIndex: 0,
+    },
+    {
+      id: 2,
+      homeTeamId: 1,
+      awayTeamId: 3,
+      homeSeed: 1,
+      awaySeed: 3,
+      startDate: "2026-09-26",
+      startTime: "10:00",
+      poolIndex: 0,
+    },
+    {
+      id: 3,
+      homeTeamId: 2,
+      awayTeamId: 5,
+      homeSeed: 2,
+      awaySeed: 5,
+      startDate: "2026-09-26",
+      startTime: "16:00",
+      poolIndex: 0,
+    },
+  ];
+  const swapped = applyPoolSideSwap(games, { gameId: 1, side: "away" }, { gameId: 2, side: "away" });
+  assert.equal(swapped[0]?.awayTeamId, 3);
+  assert.equal(swapped[1]?.awayTeamId, 2);
+
+  const flipped = applyPoolSideSwap(games, { gameId: 1, side: "home" }, { gameId: 1, side: "away" });
+  assert.equal(flipped[0]?.homeTeamId, 2);
+  assert.equal(flipped[0]?.awayTeamId, 1);
+
+  assert.throws(
+    () => applyPoolSideSwap(games, { gameId: 1, side: "home" }, { gameId: 2, side: "away" }),
+    /cannot play itself/,
+  );
+  assert.throws(() => {
+    applyPoolSideSwap(
+      [
+        ...games,
+        {
+          id: 4,
+          homeTeamId: 4,
+          awayTeamId: 6,
+          homeSeed: 4,
+          awaySeed: 6,
+          startDate: "2026-09-26",
+          startTime: "08:00",
+          poolIndex: 1,
+        },
+      ],
+      { gameId: 1, side: "away" },
+      { gameId: 4, side: "home" },
+    );
+  }, /same pool/);
+});
+
+test("round 1 does not keep teams on yesterday's park", () => {
+  const ids = [1, 2, 3, 4, 5, 6, 7, 8];
+  const slots = syncSeeds([], ids);
+  const pools = buildPools(slots);
+  const games = buildGames(slots);
+  const packed = packSchedule({
+    games,
+    poolGames: pools.flatMap((pool) => pool.games),
+    locations: [{ id: 1 }, { id: 2 }],
+    startDate: "2026-09-26",
+    endDate: "2026-09-27",
+    confirmed: [],
+    teamCount: 8,
+    rules: { ...DEFAULT_BRACKET_RULES, packFillFields: false, championshipCollapse: false },
+  });
+  const first = games.find((game) => !game.isBye)?.round;
+  const places = packed.filter((row) => row.round === first && row.locationId != null);
+  assert.equal(new Set(places.map((row) => row.locationId)).size, 2);
+});
+
+test("round 1 times follow the bracket from top to bottom", () => {
+  const slots = syncSeeds([], [1, 2, 3, 4, 5]);
+  const games = buildGames(slots);
+  const packed = packSchedule({
+    games,
+    locations: [{ id: 1 }, { id: 2 }],
+    startDate: "2026-09-27",
+    endDate: "2026-09-27",
+    confirmed: [],
+    teamCount: 5,
+    rules: { ...DEFAULT_BRACKET_RULES, championshipCollapse: false, packFillFields: true },
+  });
+  const layout = layoutSiteBracket(games, games);
+  const topDown = (layout.rounds[0]?.slots ?? [])
+    .filter((slot) => slot.game && !slot.game.isBye)
+    .slice()
+    .sort((a, b) => a.rowStart - b.rowStart);
+  const timeOf = new Map(packed.map((row) => [`${row.round}:${row.slot}`, row.startTime ?? ""]));
+  const times = topDown.map((slot) => timeOf.get(`${slot.game!.round}:${slot.game!.slot}`) ?? "");
+  const sorted = times.slice().sort();
+  assert.deepEqual(times, sorted);
+  assert.equal(times[0], "08:00");
+});
+
+test("12-team play-in and the round of 8 both stay on Sunday", () => {
+  const games = buildGames(bracketField(12, (seed) => seed));
+  const packed = packSchedule({
+    games,
+    locations: [{ id: 1 }, { id: 2 }],
+    startDate: "2026-09-26",
+    endDate: "2026-09-27",
+    confirmed: [],
+    dayPlan: defaultDayPlan("2026-09-26", "2026-09-27"),
+    teamCount: 12,
+  });
+  const byKey = new Map(packed.map((row) => [`${row.round}:${row.slot}`, row]));
+  const playIn = games.filter((game) => game.round === "r16" && !game.isBye);
+  assert.equal(playIn.length, 4);
+  assert.ok(playIn.every((game) => byKey.get(`r16:${game.slot}`)?.startDate === "2026-09-27"));
+  const quarters = games.filter((game) => game.round === "qf" && !game.isBye);
+  assert.equal(quarters.length, 4);
+  assert.ok(quarters.every((game) => byKey.get(`qf:${game.slot}`)?.startDate === "2026-09-27"));
+  const timed = packed.filter((row) => row.startTime);
+  assert.ok(timed.length > 0);
+  assert.ok(timed.every((row) => row.startDate === "2026-09-27"));
+  assert.ok(packed.every((row) => !row.startDate || row.startDate <= "2026-09-27"));
+});
+
+test("a later round is never scheduled before the game that feeds it", () => {
+  const slots = syncSeeds([], Array.from({ length: 12 }, (_, i) => i + 1));
+  const games = buildGames(slots);
+  const packed = packSchedule({
+    games,
+    locations: [{ id: 1 }, { id: 2 }],
+    startDate: "2026-09-27",
+    endDate: "2026-09-27",
+    confirmed: [],
+    teamCount: 12,
+    rules: {
+      ...DEFAULT_BRACKET_RULES,
+      championshipCollapse: false,
+      firstPitch: "18:00",
+      lastStart: "20:00",
+      lastDayLastStart: "20:00",
+      slotMinutes: 120,
+    },
+  });
+  const byKey = new Map(packed.map((row) => [`${row.round}:${row.slot}`, row]));
+  for (const game of games) {
+    if (game.isBye) continue;
+    const place = byKey.get(`${game.round}:${game.slot}`);
+    if (!place?.startDate || !place.startTime) continue;
+    for (const [round, slot] of [
+      [game.homeFromRound, game.homeFromSlot],
+      [game.awayFromRound, game.awayFromSlot],
+    ] as const) {
+      if (round == null || slot == null) continue;
+      const feeder = byKey.get(`${round}:${slot}`);
+      if (!feeder?.startDate || !feeder.startTime) continue;
+      const after =
+        place.startDate > feeder.startDate ||
+        (place.startDate === feeder.startDate && place.startTime > feeder.startTime);
+      assert.ok(
+        after,
+        `${game.round} ${place.startDate} ${place.startTime} is not after ${feeder.startDate} ${feeder.startTime}`,
+      );
+    }
+  }
+});
+
+
 

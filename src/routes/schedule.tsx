@@ -3,7 +3,7 @@ import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { SessionSkeleton, useAppSession } from "@/components/session-gate";
 import { AppShell } from "@/components/shell";
 import { RedirectToSignIn } from "@/lib/auth/gates";
-import { listNotifications, listSchedule } from "@/lib/pbi/api";
+import { listSchedule } from "@/lib/pbi/api";
 import { formatWeekendRange } from "@/lib/pbi/weekends";
 
 export const Route = createFileRoute("/schedule")({
@@ -12,11 +12,6 @@ export const Route = createFileRoute("/schedule")({
 
 function SchedulePage() {
   const { user, isPending, profile } = useAppSession();
-  const notifQuery = useQuery({
-    queryKey: ["notifications", user?.id],
-    queryFn: () => listNotifications(),
-    enabled: Boolean(user && profile),
-  });
   const scheduleQuery = useQuery({
     queryKey: ["my-schedule"],
     queryFn: () => listSchedule(),
@@ -27,11 +22,10 @@ function SchedulePage() {
   if (!user) return <RedirectToSignIn />;
   if (!profile) return <Navigate to="/" />;
 
-  const unread = (notifQuery.data ?? []).filter((n) => !n.read).length;
   const items = scheduleQuery.data ?? [];
 
   return (
-    <AppShell homeRole={profile.homeRole} unread={unread}>
+    <AppShell homeRole={profile.homeRole}>
       <h1 className="font-display text-4xl font-bold uppercase">Schedule</h1>
       <p className="mt-2 text-sm text-muted">Same games as the bracket, in time order.</p>
 
@@ -53,7 +47,7 @@ function SchedulePage() {
                 <Link
                   to="/bracket/$weekendId"
                   params={{ weekendId: String(item.weekend.id) }}
-                  className="mt-3 flex min-h-12 w-full items-center justify-center rounded-md bg-primary px-5 text-sm font-semibold uppercase tracking-wide text-primary-fg"
+                  className="mt-3 flex min-h-12 w-full items-center justify-center rounded-full bg-primary px-5 text-sm font-bold uppercase tracking-wide text-primary-fg"
                 >
                   Open Bracket
                 </Link>
@@ -64,7 +58,7 @@ function SchedulePage() {
                 </p>
               ) : (
                 item.games.map((game) => (
-                  <article key={game.id} className="rounded-lg border border-line bg-surface px-4 py-4">
+                  <article key={game.id} className="site-card">
                     <p className="text-xs font-semibold uppercase tracking-wide text-muted">
                       {game.ageGroup} · {game.roundLabel}
                     </p>

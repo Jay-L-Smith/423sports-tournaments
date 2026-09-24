@@ -23,7 +23,15 @@ export function SheetZoom({
   const [tx, setTx] = useState(0);
   const [ty, setTy] = useState(0);
   const fitRef = useRef(true);
-  const drag = useRef<{ id: number; x: number; y: number; tx: number; ty: number } | null>(null);
+  const drag = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    tx: number;
+    ty: number;
+    moved: boolean;
+    tap: HTMLElement | null;
+  } | null>(null);
   const pinch = useRef<{ dist: number; scale: number; tx: number; ty: number; cx: number; cy: number } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
 
@@ -36,19 +44,68 @@ export function SheetZoom({
     return { sw, sh };
   }, []);
 
+  const clampPan = useCallback(
+    (nextTx: number, nextTy: number, nextScale: number) => {
+      const vp = viewportRef.current;
+      const { sw, sh } = measure();
+      if (!vp) return { tx: nextTx, ty: nextTy };
+      const pad = 10;
+      const vw = vp.clientWidth;
+      const vh = vp.clientHeight;
+      const cw = sw * nextScale;
+      const ch = sh * nextScale;
+      const maxTx = pad;
+      const minTx = cw + pad * 2 <= vw ? Math.max((vw - cw) / 2, pad) : vw - cw - pad;
+      const maxTy = pad;
+      const minTy = ch + pad * 2 <= vh ? pad : vh - ch - pad;
+      return {
+        tx: clamp(nextTx, Math.min(minTx, maxTx), Math.max(minTx, maxTx)),
+        ty: clamp(nextTy, Math.min(minTy, maxTy), Math.max(minTy, maxTy)),
+      };
+    },
+    [measure],
+  );
+
   const fit = useCallback(() => {
     const vp = viewportRef.current;
-    if (!vp) return;
+    const el = contentRef.current;
+    if (!vp || !el) return;
     const { sw, sh } = measure();
     const pad = 10;
     const vw = Math.max(vp.clientWidth - pad * 2, 1);
     const vh = Math.max(vp.clientHeight - pad * 2, 1);
-    const next = clamp(Math.min(vw / sw, vh / sh), MIN_SCALE, 1);
+    const landscape = window.matchMedia("(orientation: landscape)").matches;
+    let next = 1;
+    let roundTop = 0;
+    if (landscape) {
+      next = clamp(Math.min(vw / sw, vh / sh), MIN_SCALE, 1);
+    } else {
+      const round = el.querySelector(".line-round") as HTMLElement | null;
+      let roundRight = 0;
+      if (round) {
+        let x = 0;
+        let y = 0;
+        let cur: HTMLElement | null = round;
+        while (cur && cur !== el) {
+          x += cur.offsetLeft;
+          y += cur.offsetTop;
+          cur = cur.offsetParent as HTMLElement | null;
+        }
+        roundRight = x + round.offsetWidth;
+        roundTop = y;
+      }
+      const targetW = roundRight > 40 ? roundRight + 8 : sw;
+      const targetH = round && round.offsetHeight > 40 ? round.offsetHeight : sh;
+      next = clamp(Math.min(vw / targetW, vh / targetH), MIN_SCALE, MAX_SCALE);
+    }
+    const originX = landscape ? Math.max((vp.clientWidth - sw * next) / 2, pad) : pad;
+    const originY = landscape ? Math.max((vp.clientHeight - sh * next) / 2, pad) : pad - roundTop * next;
+    const pan = clampPan(originX, originY, next);
     setScale(next);
-    setTx(Math.max((vp.clientWidth - sw * next) / 2, pad));
-    setTy(pad);
+    setTx(pan.tx);
+    setTy(pan.ty);
     fitRef.current = true;
-  }, [measure]);
+  }, [clampPan, measure]);
 
   useEffect(() => {
     fitRef.current = true;
@@ -61,9 +118,16 @@ export function SheetZoom({
     };
     raf = requestAnimationFrame(tick);
     const extra = window.setTimeout(fit, 180);
+    const mq = window.matchMedia("(orientation: landscape)");
+    const onOrient = () => {
+      fitRef.current = true;
+      fit();
+    };
+    mq.addEventListener("change", onOrient);
     return () => {
       cancelAnimationFrame(raf);
       window.clearTimeout(extra);
+      mq.removeEventListener("change", onOrient);
     };
   }, [fit, resetKey]);
 
@@ -90,16 +154,21 @@ export function SheetZoom({
     setScale((current) => {
       const next = clamp(current * factor, MIN_SCALE, MAX_SCALE);
       const ratio = next / current;
-      setTx((x) => px - (px - x) * ratio);
-      setTy((y) => py - (py - y) * ratio);
+      const pan = clampPan(px - (px - tx) * ratio, py - (py - ty) * ratio, next);
+      setTx(pan.tx);
+      setTy(pan.ty);
       return next;
     });
   }
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const hit = event.target as HTMLElement | null;
+    if (hit?.closest("input, select, textarea, [role='dialog']")) return;
+    const tap = hit?.closest("button, a") as HTMLElement | null;
+    if (tap) event.preventDefault();
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointers.current.size === 1) {
-      drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, tx, ty };
+      drag.current = { id: event.pointerId, x: event.clientX, y: event.clientY, tx, ty, moved: false, tap };
       (event.currentTarget as HTMLDivElement).setPointerCapture(event.pointerId);
     } else if (pointers.current.size === 2) {
       const pts = [...pointers.current.values()];
@@ -128,18 +197,30 @@ export function SheetZoom({
       const ratio = next / pinch.current.scale;
       fitRef.current = false;
       setScale(next);
-      setTx(pinch.current.cx - (pinch.current.cx - pinch.current.tx) * ratio);
-      setTy(pinch.current.cy - (pinch.current.cy - pinch.current.ty) * ratio);
+      const pan = clampPan(
+        pinch.current.cx - (pinch.current.cx - pinch.current.tx) * ratio,
+        pinch.current.cy - (pinch.current.cy - pinch.current.ty) * ratio,
+        next,
+      );
+      setTx(pan.tx);
+      setTy(pan.ty);
       return;
     }
     const d = drag.current;
     if (!d || event.pointerId !== d.id) return;
+    const dx = event.clientX - d.x;
+    const dy = event.clientY - d.y;
+    if (!d.moved && Math.hypot(dx, dy) < 8) return;
+    d.moved = true;
     fitRef.current = false;
-    setTx(d.tx + (event.clientX - d.x));
-    setTy(d.ty + (event.clientY - d.y));
+    const pan = clampPan(d.tx + dx, d.ty + dy, scale);
+    setTx(pan.tx);
+    setTy(pan.ty);
   }
 
   function onPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const d = drag.current;
+    if (d?.id === event.pointerId && !d.moved && d.tap) d.tap.click();
     pointers.current.delete(event.pointerId);
     if (drag.current?.id === event.pointerId) drag.current = null;
     if (pointers.current.size < 2) pinch.current = null;
@@ -158,8 +239,9 @@ export function SheetZoom({
           if (!event.ctrlKey && !event.metaKey) {
             event.preventDefault();
             fitRef.current = false;
-            setTx((x) => x - event.deltaX);
-            setTy((y) => y - event.deltaY);
+            const pan = clampPan(tx - event.deltaX, ty - event.deltaY, scale);
+            setTx(pan.tx);
+            setTy(pan.ty);
             return;
           }
           event.preventDefault();

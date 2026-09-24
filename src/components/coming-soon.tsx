@@ -15,7 +15,7 @@ export function HomeAction({
   return (
     <div
       className={cn(
-        "flex w-full flex-col items-start gap-1 rounded-lg border border-line bg-surface px-4 py-4 text-left",
+        "site-card flex w-full flex-col items-start gap-1 text-left",
         muted ? "opacity-70" : "transition-colors duration-150 hover:border-primary",
       )}
     >

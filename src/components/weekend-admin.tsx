@@ -5,12 +5,11 @@ import type { ReactNode } from "react";
 import { SessionSkeleton, useAppSession } from "@/components/session-gate";
 import { AppShell } from "@/components/shell";
 import { RedirectToSignIn } from "@/lib/auth/gates";
-import { getWeekend, listNotifications, type WeekendDetail } from "@/lib/pbi/api";
+import { getWeekend, type WeekendDetail } from "@/lib/pbi/api";
 
 export type WeekendAdminCtx = {
   id: number;
   detail: WeekendDetail;
-  unread: number;
   queryClient: QueryClient;
   bump: () => void;
 };
@@ -33,11 +32,6 @@ export function WeekendAdminFrame({
   const id = Number.parseInt(weekendId, 10);
   const { user, isPending, profile } = useAppSession();
   const queryClient = useQueryClient();
-  const notifQuery = useQuery({
-    queryKey: ["notifications", user?.id],
-    queryFn: () => listNotifications(),
-    enabled: Boolean(user && profile),
-  });
   const detailQuery = useQuery({
     queryKey: ["weekend", id],
     queryFn: () => getWeekend({ data: { id } }),
@@ -47,16 +41,15 @@ export function WeekendAdminFrame({
   if (isPending) return <SessionSkeleton />;
   if (!user) return <RedirectToSignIn />;
   if (!profile || profile.homeRole !== "admin") return <Navigate to="/" />;
-  if (!Number.isInteger(id) || id < 1) return <Navigate to="/weekends" />;
+  if (!Number.isInteger(id) || id < 1) return <Navigate to="/" />;
 
-  const unread = (notifQuery.data ?? []).filter((n) => !n.read).length;
   const detail = detailQuery.data;
 
   return (
-    <AppShell homeRole={profile.homeRole} unread={unread}>
+    <AppShell homeRole={profile.homeRole}>
       {backTo === "list" ? (
-        <Link to="/weekends" className="text-sm font-semibold text-primary">
-          All tournaments
+        <Link to="/" className="text-sm font-semibold text-primary">
+          Home
         </Link>
       ) : (
         <Link
@@ -78,7 +71,6 @@ export function WeekendAdminFrame({
         children({
           id,
           detail,
-          unread,
           queryClient,
           bump: () => bumpWeekend(queryClient, id),
         })

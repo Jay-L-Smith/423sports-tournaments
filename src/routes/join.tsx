@@ -71,7 +71,7 @@ function Join() {
 
   if (!chosenRole) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-10">
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center bg-white px-4 py-10 text-fg">
         <div className="mb-8">
           <BrandLockup />
         </div>
@@ -96,7 +96,7 @@ function Join() {
 
   if (chosenRole === "coach" && !coachReady) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4 py-10">
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center bg-white px-4 py-10 text-fg">
         <div className="mb-8">
           <BrandLockup />
         </div>

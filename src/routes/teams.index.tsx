@@ -3,7 +3,7 @@ import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
 import { SessionSkeleton, useAppSession } from "@/components/session-gate";
 import { AppShell } from "@/components/shell";
 import { RedirectToSignIn } from "@/lib/auth/gates";
-import { listMyTeams, listNotifications } from "@/lib/pbi/api";
+import { listMyTeams } from "@/lib/pbi/api";
 import { formatAgeGroups, formatWeekendRange, teamStatusLabel } from "@/lib/pbi/weekends";
 
 export const Route = createFileRoute("/teams/")({ component: MyTeamsPage });
@@ -11,11 +11,6 @@ export const Route = createFileRoute("/teams/")({ component: MyTeamsPage });
 function MyTeamsPage() {
   const { user, isPending, profile } = useAppSession();
 
-  const notifQuery = useQuery({
-    queryKey: ["notifications", user?.id],
-    queryFn: () => listNotifications(),
-    enabled: Boolean(user && profile),
-  });
   const teamsQuery = useQuery({
     queryKey: ["my-teams"],
     queryFn: () => listMyTeams(),
@@ -27,11 +22,10 @@ function MyTeamsPage() {
   if (!profile) return <Navigate to="/" />;
   if (profile.homeRole !== "coach") return <Navigate to="/" />;
 
-  const unread = (notifQuery.data ?? []).filter((n) => !n.read).length;
   const teams = teamsQuery.data ?? [];
 
   return (
-    <AppShell homeRole={profile.homeRole} unread={unread}>
+    <AppShell homeRole={profile.homeRole}>
       <h1 className="font-display text-4xl font-bold uppercase">My team</h1>
       <p className="mt-2 text-sm text-muted">Request a spot. You are not in until an Admin takes you.</p>
 

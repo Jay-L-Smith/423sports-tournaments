@@ -25,7 +25,7 @@ function TournamentHubPage() {
             params={{ weekendId: String(detail.id) }}
             className="mt-5 flex min-h-14 w-full items-center justify-center rounded-md bg-primary px-5 text-lg font-semibold text-primary-fg"
           >
-            Open Bracket
+            {detail.hasPoolGames || detail.hasBracket ? "Open Bracket" : "Build Bracket"}
           </Link>
 
           <nav className="mt-6 space-y-3" aria-label="Tournament sections">
@@ -38,7 +38,7 @@ function TournamentHubPage() {
             <SectionLink
               to="/weekends/$weekendId/rules"
               weekendId={weekendId}
-              title="Bracket rules"
+              title="423Sports rules"
               hint={`${ELIMINATION_LABELS[detail.rules.elimination]} · ${ADVANCE_LABELS[detail.rules.advance]}`}
             />
             <SectionLink
