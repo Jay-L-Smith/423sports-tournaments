@@ -1,0 +1,200 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  DEFAULT_BRACKET_RULES,
+  DEFAULT_TIEBREAKER_ORDER,
+  MIN_BRACKET_TEAMS,
+  POOL_REGEN_BLOCKED,
+  addTiebreaker,
+  hasPlayableBracket,
+  moveTiebreaker,
+  normalizeDivisions,
+  parseBracketRules,
+  poolScheduleBlockReason,
+  poolScheduleChecks,
+  setDivisionCount,
+  teamsNeededForBracket,
+} from "./rules.ts";
+import { teamEntryClosed } from "./weekends.ts";
+
+test("new teams close 24 hours before first pitch", () => {
+  const startDate = "2026-09-26";
+  const firstPitch = "08:00";
+  const open = new Date(2026, 8, 25, 7, 59, 0, 0);
+  const closed = new Date(2026, 8, 25, 8, 0, 0, 0);
+  assert.equal(teamEntryClosed({ startDate, firstPitch, now: open, scored: true }), "New teams close once a game has a score.");
+  assert.equal(teamEntryClosed({ startDate, firstPitch, now: closed }), "New teams close 24 hours before first pitch.");
+});
+
+test("empty rules fall back to 423Sports defaults", () => {
+  const rules = parseBracketRules({});
+  assert.equal(rules.minTeams, 3);
+  assert.equal(rules.advance, "all-reseed");
+  assert.equal(rules.elimination, "single");
+  assert.equal(rules.softFill, false);
+  assert.equal(rules.poolGamesPerTeam, 2);
+  assert.equal(rules.consolation, false);
+  assert.equal(rules.homePool, "coin-flip");
+  assert.equal(rules.homeBracket, "higher-seed");
+  assert.deepEqual(rules.tiebreakers, DEFAULT_TIEBREAKER_ORDER);
+  assert.deepEqual(rules.divisions.map((row) => row.size), [10, 10, 10, 10]);
+});
+
+test("tiebreakers include head-to-head and it can be moved", () => {
+  const order = parseBracketRules({}).tiebreakers;
+  assert.deepEqual(order, ["record", "runs-allowed", "head-to-head", "run-diff", "runs-scored", "coin-flip"]);
+  const moved = moveTiebreaker(order, order.indexOf("head-to-head"), -1);
+  assert.equal(moved[1], "head-to-head");
+  assert.equal(moved[2], "runs-allowed");
+});
+
+test("H2H can be added and stays available", () => {
+  const withH2h = addTiebreaker(DEFAULT_TIEBREAKER_ORDER, "head-to-head");
+  assert.ok(withH2h.includes("head-to-head"));
+  assert.equal(withH2h[withH2h.length - 1], "coin-flip");
+});
+
+test("pool games per team stay at 2", () => {
+  assert.equal(parseBracketRules({ poolGamesPerTeam: 0 }).poolGamesPerTeam, 2);
+  assert.equal(parseBracketRules({ poolGamesPerTeam: 1 }).poolGamesPerTeam, 2);
+  assert.equal(parseBracketRules({ poolGamesPerTeam: "3" }).poolGamesPerTeam, 2);
+});
+
+test("soft-fill does not invent names", () => {
+  assert.equal(parseBracketRules({}).softFill, false);
+  assert.equal(parseBracketRules({ softFill: true }).softFill, false);
+  assert.equal(DEFAULT_BRACKET_RULES.softFill, false);
+});
+
+test("old tiebreaker lists move to the current default", () => {
+  assert.deepEqual(
+    parseBracketRules({
+      tiebreakers: ["record", "runs-scored", "run-diff", "runs-allowed", "head-to-head", "coin-flip"],
+    }).tiebreakers,
+    DEFAULT_TIEBREAKER_ORDER,
+  );
+  assert.deepEqual(
+    parseBracketRules({
+      tiebreakers: ["record", "runs-scored", "run-diff", "head-to-head", "runs-allowed", "coin-flip"],
+    }).tiebreakers,
+    DEFAULT_TIEBREAKER_ORDER,
+  );
+  assert.deepEqual(
+    parseBracketRules({
+      tiebreakers: ["coin-flip", "record", "head-to-head"],
+    }).tiebreakers,
+    ["coin-flip", "record", "head-to-head"],
+  );
+});
+
+test("advance defaults to all-reseed and drops winners-only", () => {
+  assert.equal(parseBracketRules({}).advance, "all-reseed");
+  assert.equal(parseBracketRules({ advance: "winners-only" }).advance, "all-reseed");
+  assert.equal(parseBracketRules({ advance: "top-per-pool" }).advance, "top-per-pool");
+  assert.equal(DEFAULT_BRACKET_RULES.advance, "all-reseed");
+});
+
+test("double-elim and consolation are stripped", () => {
+  const rules = parseBracketRules({ elimination: "double", consolation: true });
+  assert.equal(rules.elimination, "single");
+  assert.equal(rules.consolation, false);
+});
+
+test("min teams to draw a bracket cannot go below 3", () => {
+  assert.equal(parseBracketRules({ minTeams: 1 }).minTeams, MIN_BRACKET_TEAMS);
+  assert.equal(parseBracketRules({ minTeams: "4" }).minTeams, 4);
+  assert.equal(teamsNeededForBracket(DEFAULT_BRACKET_RULES, null), 3);
+  assert.equal(teamsNeededForBracket(DEFAULT_BRACKET_RULES, 5), 5);
+});
+
+test("clocks and pack toggles parse with engine defaults", () => {
+  const rules = parseBracketRules({});
+  assert.equal(rules.firstPitch, "08:00");
+  assert.equal(rules.slotMinutes, 120);
+  assert.equal(rules.timeLimitMinutes, 105);
+  assert.equal(rules.lastStart, "20:00");
+  assert.equal(rules.lastDayLastStart, "18:00");
+  assert.equal(rules.championshipCollapse, true);
+  assert.equal(rules.packStayOnPark, true);
+  assert.equal(rules.packFillFields, true);
+  assert.equal(rules.packSeed1vsLast, true);
+  assert.equal(parseBracketRules({ packDayFilter: false, packFillFields: false }).packDayFilter, true);
+  assert.equal(parseBracketRules({ packStayOnPark: false }).packStayOnPark, true);
+});
+
+test("regen is blocked when a playable bracket exists", () => {
+  assert.equal(hasPlayableBracket([{ round: "pool", isBye: false }]), false);
+  assert.equal(hasPlayableBracket([{ round: "r16", isBye: true }]), false);
+  assert.equal(hasPlayableBracket([{ round: "qf", isBye: false }]), true);
+  assert.equal(POOL_REGEN_BLOCKED.includes("Clear the bracket"), true);
+});
+
+test("one division under 12 stays; a cut over 12 splits", () => {
+  assert.deepEqual(normalizeDivisions([], 11), [{ name: "Gold", size: 11 }]);
+  assert.deepEqual(
+    normalizeDivisions([{ name: "Gold", size: 40 }], 40).map((row) => row.size),
+    [10, 10, 10, 10],
+  );
+  assert.deepEqual(normalizeDivisions([{ name: "Gold", size: 8 }, { name: "Silver", size: 8 }], 16), [
+    { name: "Gold", size: 8 },
+    { name: "Silver", size: 8 },
+  ]);
+  assert.throws(() => normalizeDivisions([{ name: "Gold", size: 10 }, { name: "Silver", size: 10 }], 40));
+  const two = setDivisionCount([], 2, 16);
+  assert.equal(two.length, 2);
+  assert.equal(two.reduce((n, row) => n + row.size, 0), 16);
+});
+
+test("admin can set slot minutes other than 120", () => {
+  assert.equal(parseBracketRules({ slotMinutes: 90 }).slotMinutes, 90);
+  assert.equal(parseBracketRules({ slotMinutes: "75" }).slotMinutes, 75);
+  assert.equal(parseBracketRules({ slotMinutes: 15 }).slotMinutes, 15);
+  assert.equal(parseBracketRules({ slotMinutes: 240 }).slotMinutes, 240);
+});
+
+test("generate checklist names what is missing", () => {
+  const empty = poolScheduleChecks({
+    ageGroups: [],
+    approvedByAge: {},
+    locationCount: 0,
+    minTeams: 3,
+    hasBracket: false,
+  });
+  assert.equal(empty.ready, false);
+  assert.equal(empty.items.find((row) => row.id === "ages")?.to, "/weekends/$weekendId/edit");
+  assert.equal(empty.items.find((row) => row.id === "teams")?.to, "/weekends/$weekendId/teams");
+  assert.equal(empty.items.find((row) => row.id === "parks")?.to, "/weekends/$weekendId/locations");
+  const reason = poolScheduleBlockReason(empty);
+  assert.ok(reason?.includes("age group"));
+  assert.ok(reason?.includes("park"));
+
+  const ready = poolScheduleChecks({
+    ageGroups: ["12U"],
+    approvedByAge: { "12U": 8 },
+    locationCount: 1,
+    minTeams: 3,
+    hasBracket: false,
+  });
+  assert.equal(ready.ready, true);
+  assert.equal(poolScheduleBlockReason(ready), null);
+
+  const blocked = poolScheduleChecks({
+    ageGroups: ["12U"],
+    approvedByAge: { "12U": 8 },
+    locationCount: 1,
+    minTeams: 3,
+    hasBracket: true,
+  });
+  assert.equal(blocked.ready, false);
+  assert.equal(blocked.items.find((row) => row.id === "bracket")?.to, "/bracket/$weekendId");
+  assert.ok(poolScheduleBlockReason(blocked)?.includes("Clear the bracket"));
+
+  const playUp = poolScheduleChecks({
+    ageGroups: ["16U"],
+    approvedByAge: { "16U": 2, "15U": 10 },
+    locationCount: 1,
+    minTeams: 3,
+    hasBracket: false,
+  });
+  assert.equal(playUp.items.find((row) => row.id === "teams")?.ok, true);
+});

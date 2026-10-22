@@ -1,0 +1,48 @@
+Rebuild this one screen. Do not redesign it. Match the layout and the materials below. Use the existing 423Sports silver swoosh wordmark asset. Do not generate a new logo.
+
+Screen: tournament detail, admin view. Phone width. Safe areas respected.
+
+TOP BAR, fixed, black #0c0c0c, 56px, hairline bottom border rgba(255,255,255,0.08).
+Left: 423Sports wordmark, 28px tall.
+Center: segmented control, 32px tall, radius 16, track #2a2a2a. Selected segment "admin" is white #f4f4f4 with black text. Unselected "coach" is transparent with #bdbdbd text.
+Right: share icon, profile icon, 22px, #f2f2f2, 16px gap.
+
+HERO is one continuous panel. It starts flush under the top bar and ends after the standings line. No card, no radius, no gap, no separate logo tile.
+Background is brushed black metal, not a flat fill and not a photo:
+background-color: #121212;
+background-image:
+  repeating-linear-gradient(180deg, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px, rgba(0,0,0,0) 1px, rgba(0,0,0,0) 3px),
+  linear-gradient(90deg, #0a0a0a 0%, #1c1c1c 18%, #0e0e0e 36%, #242424 52%, #101010 70%, #1a1a1a 100%);
+Add a 1px top inset highlight: box-shadow: inset 0 1px 0 rgba(255,255,255,0.08).
+
+On the hero, 20px side padding:
+Row 1: "Back" left, 15px, #7eb6ff. Right, same row: outline pill "MESSAGE COACHES", height 36, radius 18, 1px solid rgba(255,255,255,0.85), transparent fill, 12px white, tracking 0.06em.
+Then title "FALL SHOWCASE 2026", 34px, weight 800, white, line-height 1.05, margin-top 14.
+Then "Oct 23–24, 2026 · $700.00 per team", 15px, #c8c8c8.
+Then "16U · 7/12 in", 15px, #e8e8e8, margin-top 12.
+Then the 423Sports wordmark centered, 168px wide, margin-top 18. Smaller than the old card logo.
+Then a full-width brushed-silver pill, height 52, radius 26, margin-top 16. Label "GAME INFO", 14px, #3a3a3a, tracking 0.18em.
+Silver pill paint, do not use a flat gray:
+background: linear-gradient(180deg, #f7f7f7 0%, #d7d7d7 42%, #b9b9b9 58%, #e4e4e4 100%);
+box-shadow: inset 0 1px 0 #ffffff, inset 0 -2px 3px rgba(0,0,0,0.25), 0 8px 16px rgba(0,0,0,0.35);
+Then centered "STANDINGS · SCORES · BRACKET", 11px, white, tracking 0.22em, margin 14px 0 18px.
+
+WHITE HALF starts the moment the hero ends. Background #f7f6f4. No texture.
+Two-column grid, gap 12, padding 16. Five raised tiles: DETAILS, RULES, TEAMS, FIELDS, STAFF. STAFF sits alone on the left of row 3. Each tile min-height 84, radius 18, padding 14.
+Tile material, this exact stack, not a border-only card:
+background: linear-gradient(180deg, #ffffff 0%, #f3f3f3 100%);
+border: 1px solid #ffffff;
+box-shadow:
+  inset 0 1px 0 rgba(255,255,255,1),
+  inset 0 -1px 0 rgba(0,0,0,0.06),
+  0 1px 1px rgba(255,255,255,0.8),
+  0 10px 18px rgba(0,0,0,0.12),
+  0 2px 4px rgba(0,0,0,0.08);
+Title 15px weight 800 #1a1a1a. Value 13px #8a8a8a under it. Chevron right, #c4c4c4.
+Values: DETAILS "$700.00 per team". RULES "Single elimination". TEAMS "7/12 in" in #3f8f5a. FIELDS "Uses 1 of 2" in #3f8f5a. STAFF "Needs staff" in #b0893e.
+
+Under the grid, centered "DELETE TOURNAMENT", 13px, tracking 0.14em, #8d8d8d, weight 700. No button chrome.
+
+BOTTOM TABS, white, top hairline #eceae6. Three items only: Schedule (home), Notifications (bell), Resources (bars). Icon 22px, label 11px, #8a8a8a. No fourth tab.
+
+Do not add illustrations, gradients on the white half, extra cards, or a More tab. If a texture looks flat, fix the gradients above. Do not substitute a stock metal image.

@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "423Sports Tournaments",
+      "hasCanvas": false,
+      "bodyTextLen": 40,
+      "bodyTextHash": "173bd96148c164a21f4820e09f0a6ea138ee48013da0a037d5bae72ff0c4bdbf",
+      "bodyTextPrefix": "423SPORTS TOURNAMENTS Loading your home…",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "423Sports Tournaments",
+      "hasCanvas": false,
+      "bodyTextLen": 40,
+      "bodyTextHash": "173bd96148c164a21f4820e09f0a6ea138ee48013da0a037d5bae72ff0c4bdbf",
+      "bodyTextPrefix": "423SPORTS TOURNAMENTS Loading your home…",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [
+    "BRAND WARNING: /workspace/public/og.jpg is over 600 KB — link scrapers (X card previews included) time out or skip images this heavy, so the card silently fails to unfurl. Re-encode as JPEG (public/og.jpg, ffmpeg -q:v 4) per /workspace/.grok/skills/og/SKILL.md."
+  ],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

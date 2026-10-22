@@ -1,0 +1,10 @@
+Checkpoint before the second-field column and the Sunday field move.
+
+Restore by copying these files back over the app:
+
+  api.ts              -> src/lib/pbi/api.ts
+  bracket.ts          -> src/lib/pbi/bracket.ts
+  bracket.test.ts     -> src/lib/pbi/bracket.test.ts
+  bracket-board.tsx   -> src/components/bracket-board.tsx
+
+Do not edit the copies in this folder.

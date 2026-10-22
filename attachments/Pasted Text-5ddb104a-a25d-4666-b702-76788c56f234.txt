@@ -1,0 +1,30 @@
+Do not rebuild the screen. Patch the current tournament detail screen. Keep the layout. Fix only the materials. The reference image is the target. If your result does not match it, you are wrong.
+
+BUG 1. The center 423Sports mark is sitting in a visible rectangle. That rectangle is forbidden. Put the existing wordmark asset directly on the black metal. No card, no tile, no background-color, no border, no box-shadow on the image wrapper. If the file has a baked-in black background, knock it out: mix-blend-mode: screen; background: transparent; or use the transparent PNG. Width 168px, centered, margin-top 18px. It must look painted onto the metal, same as the mark in the top bar.
+
+BUG 2. GAME INFO is a flat white button. Replace it with a brushed-silver pill. Height 52, radius 26, full width of the hero padding. Label 14px, #3a3a3a, letter-spacing 0.18em. Exact paint:
+background: linear-gradient(180deg, #f7f7f7 0%, #d5d5d5 40%, #a9a9a9 62%, #ececec 100%);
+box-shadow: inset 0 1px 0 #ffffff, inset 0 -3px 4px rgba(0,0,0,0.28), 0 10px 18px rgba(0,0,0,0.35);
+Do not use #fff. Do not use a single gray.
+
+BUG 3. The hero metal is too flat and the logo box breaks it. One panel from under the top bar through the standings line. No nested card. Exact paint on that panel only:
+background-color: #101010;
+background-image:
+  repeating-linear-gradient(180deg, rgba(255,255,255,0.045) 0 1px, rgba(0,0,0,0) 1px 3px),
+  linear-gradient(100deg, #070707 0%, #1b1b1b 22%, #0c0c0c 40%, #2a2a2a 55%, #0e0e0e 72%, #191919 100%);
+box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+
+BUG 4. DETAILS, RULES, TEAMS, FIELDS, STAFF are flat. Raise them. Same grid, same copy, same colors. Exact tile:
+background: linear-gradient(180deg, #ffffff 0%, #f1f1f1 100%);
+border: 1px solid #ffffff;
+border-radius: 18px;
+box-shadow:
+  inset 0 1px 0 #ffffff,
+  inset 0 -1px 0 rgba(0,0,0,0.08),
+  0 12px 20px rgba(0,0,0,0.14),
+  0 2px 4px rgba(0,0,0,0.08);
+Green values #3f8f5a. Gold value #b0893e.
+
+BUG 5. STAFF is cut off by the tab bar. The white half scrolls. Tab bar is fixed. Bottom padding on the scroll area is at least 96px. DELETE TOURNAMENT stays under the grid, centered, 13px, #8d8d8d, tracking 0.14em, no chrome.
+
+Do not change the top bar, Back, MESSAGE COACHES, title, date, 16U line, standings line, or the three tabs. Do not add a fourth tab. Do not put the wordmark back in a card.

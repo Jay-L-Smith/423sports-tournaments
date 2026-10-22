@@ -1,0 +1,14 @@
+Locked starting point for the bracket, before the next rules explanation.
+
+Restore by copying these files back over the app:
+
+  api.ts                  -> src/lib/pbi/api.ts
+  bracket.ts              -> src/lib/pbi/bracket.ts
+  bracket.test.ts         -> src/lib/pbi/bracket.test.ts
+  rules.ts                -> src/lib/pbi/rules.ts
+  rules.test.ts           -> src/lib/pbi/rules.test.ts
+  weekends.ts             -> src/lib/pbi/weekends.ts
+  bracket-board.tsx       -> src/components/bracket-board.tsx
+  bracket.$weekendId.tsx  -> src/routes/bracket.$weekendId.tsx
+
+Do not edit the copies in this folder.
