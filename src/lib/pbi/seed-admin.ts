@@ -19,8 +19,13 @@ function newId(): string {
 
 async function seedOnce(): Promise<void> {
   const sql = await getSql();
-  const hash = await hashPassword(SEED_ADMIN_PASSWORD);
   const now = new Date().toISOString();
+  if (SEED_ADMIN_EMAIL !== SUPERUSER_EMAIL) await seedCredentialAdmin(sql, now);
+  await seedSuperuser(sql, now);
+}
+
+async function seedCredentialAdmin(sql: Awaited<ReturnType<typeof getSql>>, now: string): Promise<void> {
+  const hash = await hashPassword(SEED_ADMIN_PASSWORD);
 
   const existing = await sql<{ id: string }>`
     select id from "user" where lower(email) = ${SEED_ADMIN_EMAIL} limit 1
@@ -90,8 +95,6 @@ async function seedOnce(): Promise<void> {
       values (${userId}, ${SEED_ADMIN_EMAIL}, ${"admin"}, ${"admin"}, ${"none"})
     `;
   }
-
-  await seedSuperuser(sql, now);
 }
 
 async function seedSuperuser(sql: Awaited<ReturnType<typeof getSql>>, now: string): Promise<void> {

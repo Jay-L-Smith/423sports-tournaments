@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, Navigate, useNavigate } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { SessionSkeleton, useAppSession } from "@/components/session-gate";
 import { AppShell } from "@/components/shell";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,14 @@ function RegisterTeamPage() {
   const [ageGroup, setAgeGroup] = useState<AgeGroup | null>(null);
   const [name, setName] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const raw = window.sessionStorage.getItem("pbi-register-weekend");
+    if (!raw) return;
+    window.sessionStorage.removeItem("pbi-register-weekend");
+    const id = Number(raw);
+    if (Number.isInteger(id) && id > 0) setWeekendId(id);
+  }, []);
 
   const openQuery = useQuery({
     queryKey: ["open-tournaments"],

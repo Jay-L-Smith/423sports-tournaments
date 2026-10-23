@@ -3,8 +3,8 @@ import test from "node:test";
 import { clientEmailIssue, plainAuthError } from "./auth-errors.ts";
 
 test("seed admin email is treated as valid", () => {
-  assert.equal(clientEmailIssue("PBI.Tournaments.Temp@gmail.com"), null);
-  assert.equal(clientEmailIssue("  pbi.tournaments.temp@gmail.com  "), null);
+  assert.equal(clientEmailIssue("Jay_L_Smith@outlook.com"), null);
+  assert.equal(clientEmailIssue("  jay_l_smith@outlook.com  "), null);
 });
 
 test("wrong password is not reported as an invalid email", () => {

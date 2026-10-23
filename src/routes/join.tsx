@@ -14,7 +14,7 @@ import { enterApp, signInWithEmail, signUpWithEmail } from "@/lib/pbi/email-auth
 import { ROLE_COPY, type Role } from "@/lib/pbi/roles";
 import { formatPhoneInput } from "@/lib/utils";
 
-type JoinSearch = { role?: string; invite?: number };
+type JoinSearch = { role?: string; invite?: number; e?: number };
 
 export const Route = createFileRoute("/join")({
   validateSearch: (search: Record<string, unknown>): JoinSearch => ({
@@ -25,6 +25,12 @@ export const Route = createFileRoute("/join")({
         : typeof search.invite === "string" && /^\d+$/.test(search.invite)
           ? Number(search.invite)
           : undefined,
+    e:
+      typeof search.e === "number"
+        ? search.e
+        : typeof search.e === "string" && /^\d+$/.test(search.e)
+          ? Number(search.e)
+          : undefined,
   }),
   component: Join,
 });
@@ -32,7 +38,7 @@ export const Route = createFileRoute("/join")({
 function Join() {
   const navigate = useNavigate();
   const { user, isPending, profile } = useAppSession();
-  const { role: roleParam, invite: inviteParam } = Route.useSearch();
+  const { role: roleParam, invite: inviteParam, e: eventId } = Route.useSearch();
   const chosenRole: Role | null = roleParam === "coach" || roleParam === "admin" ? roleParam : null;
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
@@ -198,7 +204,7 @@ function Join() {
             admin: "Run the tournament. Teams, fields, and the bracket.",
           }}
           onPick={(role) => {
-            void navigate({ to: "/join", search: { role, invite: inviteParam } });
+            void navigate({ to: "/join", search: { role, invite: inviteParam, e: eventId } });
           }}
         />
         <p className="mt-8 text-center text-sm text-white/70">
@@ -217,6 +223,12 @@ function Join() {
     return (
       <main className="site-splash mx-auto flex min-h-dvh max-w-md flex-col px-5 pt-10">
         <img src="/logo.png" alt="423Sports" className="mx-auto mb-8 block w-full max-w-[19rem]" />
+        {eventId ? (
+          <div className="mb-6 text-center">
+            <h1 className="text-2xl font-semibold text-white">This is your team — claim it</h1>
+            <p className="mt-2 text-sm text-white/70">Create the coach account, then hold the spot. The director still confirms the team.</p>
+          </div>
+        ) : null}
         <CoachSignupForm
           name={name}
           phone={phone}

@@ -1,4 +1,3 @@
-import { mkdirSync } from "node:fs";
 import { pendingMigrations } from "../../scripts/migration-plan.mjs";
 
 /** Which database backend is active. */
@@ -112,6 +111,7 @@ async function createPgliteSql(): Promise<Sql> {
   // globalThis so HMR does not open a second instance.
   globalRef.__pgliteInstance__ ??= (async () => {
     const { PGlite } = await import("@electric-sql/pglite");
+    const { mkdirSync } = await import("node:fs");
     // Persist across preview restarts so the seed Admin (and weekends) survive
     // code updates. Deployed apps use Neon and ignore this path.
     const dataDir = "/workspace/.data/pglite";

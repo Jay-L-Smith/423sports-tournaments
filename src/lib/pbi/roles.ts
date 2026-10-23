@@ -1,6 +1,6 @@
-export const SEED_ADMIN_EMAIL = "pbi.tournaments.temp@gmail.com";
-/** The only account that can grant superuser access. */
+/** The only account that can grant superuser access. Also the boot seed admin. */
 export const SUPERUSER_EMAIL = "jay_l_smith@outlook.com";
+export const SEED_ADMIN_EMAIL = SUPERUSER_EMAIL;
 
 export const ROLES = ["parent", "athlete", "coach", "admin"] as const;
 export type Role = (typeof ROLES)[number];
@@ -37,7 +37,6 @@ export function isCoachPreviewAdmin(email: string | null | undefined, name?: str
   const normalized = normalizeEmail(email ?? "");
   const label = (name ?? "").trim().toLowerCase();
   if (label === "ash lawson") return true;
-  if (normalized === SEED_ADMIN_EMAIL) return true;
   return normalized.endsWith("@hotmail.com") && normalized.includes("pbi") && (normalized.includes("camp") || normalized.includes("tournament"));
 }
 

@@ -11,6 +11,7 @@ import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
 import { CoachTour } from "@/components/coach-tour";
 import { InstallPrompt } from "@/components/install-prompt";
+import { SignInSheetHost } from "@/components/sign-in-sheet";
 import { noteHref } from "@/lib/screen-back";
 import { settleFreshLoad } from "@/lib/chunk-reload";
 import appCss from "../styles.css?url";
@@ -138,6 +139,7 @@ function Root() {
         <AuthProvider>
           <QueryClientProvider client={queryClient}>
             <Outlet />
+            <SignInSheetHost />
             <InstallPrompt />
             <CoachTour />
           </QueryClientProvider>

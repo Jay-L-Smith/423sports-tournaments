@@ -28,7 +28,12 @@ import {
 } from "@/lib/pbi/api";
 import type { Role } from "@/lib/pbi/roles";
 
-export const Route = createFileRoute("/")({ component: Home });
+export const Route = createFileRoute("/")({
+  validateSearch: (search: Record<string, unknown>): { sheet?: "in" | "up" } => ({
+    sheet: search.sheet === "up" ? "up" : search.sheet === "in" ? "in" : undefined,
+  }),
+  component: Home,
+});
 
 function Home() {
   const { user, isPending, profile, refetchProfile } = useAppSession();

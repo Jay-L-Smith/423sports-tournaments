@@ -103,6 +103,21 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.public-hub {
+  background: #0e0f12;
+  color: #f5f5f5;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+.flyer-row {
+  scrollbar-width: none;
+}
+
+.flyer-row::-webkit-scrollbar {
+  display: none;
+}
+
 .install-banner {
   animation: install-drop 220ms ease-out;
 }

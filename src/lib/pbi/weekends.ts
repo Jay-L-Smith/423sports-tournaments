@@ -262,6 +262,21 @@ export function registrationClosed(
   return null;
 }
 
+export function publicRegistrationLabel(opts: {
+  endDate: string;
+  approved: number;
+  maxTeams: number | null;
+  sheetLocked: boolean;
+  hasScoredGame: boolean;
+  hasChampion: boolean;
+}): { status: "open" | "full" | "closed"; label: string } {
+  if (registrationClosed(opts)) return { status: "closed", label: "Registration closed" };
+  const cap = opts.maxTeams && opts.maxTeams > 0 ? opts.maxTeams : 12;
+  if (opts.approved >= cap) return { status: "full", label: "Full" };
+  const spots = cap - opts.approved;
+  return { status: "open", label: spots === 1 ? "1 spot open" : `${spots} spots open` };
+}
+
 /** The sheet locks 24 hours before first pitch, or once a game has a score. Off is an admin override. On is a hand lock. */
 export type SheetLock = "auto" | "on" | "off";
 

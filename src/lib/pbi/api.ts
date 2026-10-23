@@ -80,6 +80,7 @@ import {
   type TeamStatus,
   liveLinkOpen,
   liveLinksCloseAt,
+  publicRegistrationLabel,
 } from "./weekends";
 import { coachTextKind, type CoachTextKind } from "./coach-text";
 import {
@@ -2298,6 +2299,8 @@ export const resubmitCoachAccess = createServerFn({ method: "POST" }).middleware
 	if (!next) throw new Error("Could not send that request. Try again.");
 	return next;
 });
+export type PublicPlace = { name: string; address: string };
+
 export type PublicTournament = {
   id: number;
   name: string;
@@ -2306,62 +2309,139 @@ export type PublicTournament = {
   ageGroups: string[];
   teamFeeCents: number | null;
   parks: string[];
+  places: PublicPlace[];
   flyer: string | null;
+  hasBracket: boolean;
+  registrationStatus: "open" | "full" | "closed";
+  registrationLabel: string;
 };
 
-/** Upcoming tournaments a stranger can see. No drafts, no past, no game info. */
+function publicTournamentFromRow(row: any, now: Date): PublicTournament | null {
+  const endDate = String(row.end_date || "").slice(0, 10);
+  const ages = parseStoredAgeGroups(row.age_groups);
+  if (tournamentPastAt(endDate, now)) return null;
+  let rawPlaces = row.places;
+  if (typeof rawPlaces === "string") {
+    try {
+      rawPlaces = JSON.parse(rawPlaces);
+    } catch {
+      rawPlaces = [];
+    }
+  }
+  const places = Array.isArray(rawPlaces)
+    ? rawPlaces
+        .map((place: any) => ({
+          name: String(place?.name || "").trim(),
+          address: String(place?.address || "").trim(),
+        }))
+        .filter((place: PublicPlace) => place.name || place.address)
+    : [];
+  const parks = places.map((place) => place.name).filter(Boolean);
+  const flyer = typeof row.flyer === "string" && row.flyer.startsWith("data:image/") ? row.flyer : null;
+  const fee = row.team_fee_cents == null || row.team_fee_cents === "" ? null : Number(row.team_fee_cents);
+  const maxTeams = row.max_teams == null || row.max_teams === "" ? null : Number(row.max_teams);
+  const registration = publicRegistrationLabel({
+    endDate,
+    approved: Number(row.approved_count) || 0,
+    maxTeams: maxTeams != null && Number.isFinite(maxTeams) ? maxTeams : null,
+    sheetLocked: row.sheet_lock === "on",
+    hasScoredGame: Boolean(row.has_scored_game),
+    hasChampion: Boolean(row.has_champion),
+  });
+  return {
+    id: Number(row.id),
+    name: String(row.name || "Tournament"),
+    startDate: String(row.start_date || "").slice(0, 10),
+    endDate,
+    ageGroups: ages,
+    teamFeeCents: fee != null && Number.isFinite(fee) ? fee : null,
+    parks,
+    places,
+    flyer,
+    hasBracket: Boolean(row.has_bracket),
+    registrationStatus: registration.status,
+    registrationLabel: registration.label,
+  };
+}
+
+const publicTournamentSelect = `
+  select
+    w.id,
+    w.name,
+    w.start_date::text as start_date,
+    w.end_date::text as end_date,
+    w.age_groups,
+    w.team_fee_cents,
+    w.max_teams,
+    w.sheet_lock,
+    w.flyer,
+    (select count(*)::int from teams t where t.weekend_id = w.id and t.status = 'approved') as approved_count,
+    exists (
+      select 1 from games g
+      where g.weekend_id = w.id and g.round <> 'pool' and g.is_bye = false
+    ) as has_bracket,
+    exists (
+      select 1 from games g
+      where g.weekend_id = w.id
+        and (g.home_score is not null or g.away_score is not null or g.forfeit is not null)
+    ) as has_scored_game,
+    (
+      exists (
+        select 1 from games g
+        where g.weekend_id = w.id
+          and g.round = 'f'
+          and g.is_bye = false
+          and g.no_contest = false
+          and (
+            g.forfeit is not null
+            or (g.home_score is not null and g.away_score is not null and g.home_score <> g.away_score)
+          )
+      )
+      and not exists (
+        select 1 from games g
+        where g.weekend_id = w.id
+          and g.round = 'f'
+          and g.is_bye = false
+          and g.no_contest = false
+          and g.forfeit is null
+          and (g.home_score is null or g.away_score is null or g.home_score = g.away_score)
+      )
+    ) as has_champion,
+    (
+      select coalesce(json_agg(json_build_object('name', park, 'address', address) order by park), '[]'::json)
+      from (
+        select distinct l.name as park, l.address as address
+        from weekend_locations l
+        where l.weekend_id = w.id and l.name !~ '^Field [0-9]+ TBD$'
+      ) parks
+    ) as places
+  from weekends w
+`;
+
+/** Upcoming tournaments a stranger can see. No drafts, no past. */
 export const listPublicTournaments = createServerFn({ method: "GET" }).handler(async (): Promise<PublicTournament[]> => {
   await ensureLiveOpsColumns();
   const sql: any = await getSql();
-  const rows = await sql`
-    select
-      w.id,
-      w.name,
-      w.start_date::text as start_date,
-      w.end_date::text as end_date,
-      w.age_groups,
-      w.team_fee_cents,
-      w.flyer,
-      w.lifecycle,
-      (select count(*)::int from weekend_locations l where l.weekend_id = w.id and l.name !~ '^Field [0-9]+ TBD$') as location_count,
-      exists (
-        select 1 from games g
-        where g.weekend_id = w.id and g.round <> ${"pool"} and g.is_bye = ${false}
-      ) as has_bracket,
-      (
-        select coalesce(json_agg(park order by park), '[]'::json)
-        from (
-          select distinct l.name as park
-          from weekend_locations l
-          where l.weekend_id = w.id and l.name !~ '^Field [0-9]+ TBD$'
-        ) parks
-      ) as parks
-    from weekends w
-    where w.lifecycle <> ${"announced"}
-    order by w.start_date asc, w.id asc
-  `;
+  const rows = await sql.query(`${publicTournamentSelect} where w.lifecycle <> $1 order by w.start_date asc, w.id asc`, ["announced"]);
   const now = new Date();
   const list: PublicTournament[] = [];
   for (const row of rows) {
-    const endDate = String(row.end_date || "").slice(0, 10);
-    const ages = parseStoredAgeGroups(row.age_groups);
-    if (tournamentPastAt(endDate, now)) continue;
-    if (ages.length === 0 || Number(row.location_count) === 0 || !row.has_bracket) continue;
-    const parks = Array.isArray(row.parks) ? row.parks.map((park: unknown) => String(park)).filter(Boolean) : [];
-    const flyer = typeof row.flyer === "string" && row.flyer.startsWith("data:image/") ? row.flyer : null;
-    const fee = row.team_fee_cents == null || row.team_fee_cents === "" ? null : Number(row.team_fee_cents);
-    list.push({
-      id: Number(row.id),
-      name: String(row.name || "Tournament"),
-      startDate: String(row.start_date || "").slice(0, 10),
-      endDate,
-      ageGroups: ages,
-      teamFeeCents: fee != null && Number.isFinite(fee) ? fee : null,
-      parks,
-      flyer,
-    });
+    const event = publicTournamentFromRow(row, now);
+    if (event) list.push(event);
   }
   return list;
+});
+
+export const getPublicTournament = createServerFn({ method: "GET" }).validator((data: any) => {
+  const id = Number(data?.id);
+  if (!Number.isInteger(id) || id < 1) throw new Error("Missing tournament.");
+  return { id };
+}).handler(async ({ data }): Promise<PublicTournament | null> => {
+  await ensureLiveOpsColumns();
+  const sql: any = await getSql();
+  const rows = await sql.query(`${publicTournamentSelect} where w.id = $1 and w.lifecycle <> $2 limit 1`, [data.id, "announced"]);
+  if (!rows[0]) return null;
+  return publicTournamentFromRow(rows[0], new Date());
 });
 
 export const listWeekends = createServerFn({ method: "GET" }).middleware([authMiddleware]).handler(async ({ context }): Promise<Weekend[]> => {

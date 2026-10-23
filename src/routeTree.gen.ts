@@ -16,9 +16,11 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as LoginsRouteImport } from './routes/logins'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as ResourcesRouteImport } from './routes/resources'
+import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as TeamsRouteImport } from './routes/teams'
 import { Route as WeekendsRouteImport } from './routes/weekends'
 import { Route as BracketWeekendIdRouteImport } from './routes/bracket.$weekendId'
+import { Route as TWeekendIdRouteImport } from './routes/t.$weekendId'
 import { Route as TeamsIndexRouteImport } from './routes/teams.index'
 import { Route as TeamsTeamIdRouteImport } from './routes/teams.$teamId'
 import { Route as TeamsNewRouteImport } from './routes/teams.new'
@@ -68,6 +70,11 @@ const ResourcesRoute = ResourcesRouteImport.update({
   path: '/resources',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SignInRoute = SignInRouteImport.update({
+  id: '/sign-in',
+  path: '/sign-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TeamsRoute = TeamsRouteImport.update({
   id: '/teams',
   path: '/teams',
@@ -81,6 +88,11 @@ const WeekendsRoute = WeekendsRouteImport.update({
 const BracketWeekendIdRoute = BracketWeekendIdRouteImport.update({
   id: '/bracket/$weekendId',
   path: '/bracket/$weekendId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TWeekendIdRoute = TWeekendIdRouteImport.update({
+  id: '/t/$weekendId',
+  path: '/t/$weekendId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TeamsIndexRoute = TeamsIndexRouteImport.update({
@@ -159,9 +171,11 @@ export interface FileRoutesByFullPath {
   '/logins': typeof LoginsRoute
   '/notifications': typeof NotificationsRoute
   '/resources': typeof ResourcesRoute
+  '/sign-in': typeof SignInRoute
   '/teams': typeof TeamsRouteWithChildren
   '/weekends': typeof WeekendsRouteWithChildren
   '/bracket/$weekendId': typeof BracketWeekendIdRoute
+  '/t/$weekendId': typeof TWeekendIdRoute
   '/teams/$teamId': typeof TeamsTeamIdRoute
   '/teams/new': typeof TeamsNewRoute
   '/weekends/$weekendId': typeof WeekendsWeekendIdRouteWithChildren
@@ -184,7 +198,9 @@ export interface FileRoutesByTo {
   '/logins': typeof LoginsRoute
   '/notifications': typeof NotificationsRoute
   '/resources': typeof ResourcesRoute
+  '/sign-in': typeof SignInRoute
   '/bracket/$weekendId': typeof BracketWeekendIdRoute
+  '/t/$weekendId': typeof TWeekendIdRoute
   '/teams/$teamId': typeof TeamsTeamIdRoute
   '/teams/new': typeof TeamsNewRoute
   '/teams': typeof TeamsIndexRoute
@@ -207,9 +223,11 @@ export interface FileRoutesById {
   '/logins': typeof LoginsRoute
   '/notifications': typeof NotificationsRoute
   '/resources': typeof ResourcesRoute
+  '/sign-in': typeof SignInRoute
   '/teams': typeof TeamsRouteWithChildren
   '/weekends': typeof WeekendsRouteWithChildren
   '/bracket/$weekendId': typeof BracketWeekendIdRoute
+  '/t/$weekendId': typeof TWeekendIdRoute
   '/teams/$teamId': typeof TeamsTeamIdRoute
   '/teams/new': typeof TeamsNewRoute
   '/weekends/$weekendId': typeof WeekendsWeekendIdRouteWithChildren
@@ -234,9 +252,11 @@ export interface FileRouteTypes {
     | '/logins'
     | '/notifications'
     | '/resources'
+    | '/sign-in'
     | '/teams'
     | '/weekends'
     | '/bracket/$weekendId'
+    | '/t/$weekendId'
     | '/teams/$teamId'
     | '/teams/new'
     | '/weekends/$weekendId'
@@ -259,7 +279,9 @@ export interface FileRouteTypes {
     | '/logins'
     | '/notifications'
     | '/resources'
+    | '/sign-in'
     | '/bracket/$weekendId'
+    | '/t/$weekendId'
     | '/teams/$teamId'
     | '/teams/new'
     | '/teams'
@@ -281,9 +303,11 @@ export interface FileRouteTypes {
     | '/logins'
     | '/notifications'
     | '/resources'
+    | '/sign-in'
     | '/teams'
     | '/weekends'
     | '/bracket/$weekendId'
+    | '/t/$weekendId'
     | '/teams/$teamId'
     | '/teams/new'
     | '/weekends/$weekendId'
@@ -307,9 +331,11 @@ export interface RootRouteChildren {
   LoginsRoute: typeof LoginsRoute
   NotificationsRoute: typeof NotificationsRoute
   ResourcesRoute: typeof ResourcesRoute
+  SignInRoute: typeof SignInRoute
   TeamsRoute: typeof TeamsRouteWithChildren
   WeekendsRoute: typeof WeekendsRouteWithChildren
   BracketWeekendIdRoute: typeof BracketWeekendIdRoute
+  TWeekendIdRoute: typeof TWeekendIdRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
 }
 
@@ -364,6 +390,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResourcesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sign-in': {
+      id: '/sign-in'
+      path: '/sign-in'
+      fullPath: '/sign-in'
+      preLoaderRoute: typeof SignInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/teams': {
       id: '/teams'
       path: '/teams'
@@ -383,6 +416,13 @@ declare module '@tanstack/react-router' {
       path: '/bracket/$weekendId'
       fullPath: '/bracket/$weekendId'
       preLoaderRoute: typeof BracketWeekendIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/t/$weekendId': {
+      id: '/t/$weekendId'
+      path: '/t/$weekendId'
+      fullPath: '/t/$weekendId'
+      preLoaderRoute: typeof TWeekendIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/teams/': {
@@ -538,9 +578,11 @@ const rootRouteChildren: RootRouteChildren = {
   LoginsRoute: LoginsRoute,
   NotificationsRoute: NotificationsRoute,
   ResourcesRoute: ResourcesRoute,
+  SignInRoute: SignInRoute,
   TeamsRoute: TeamsRouteWithChildren,
   WeekendsRoute: WeekendsRouteWithChildren,
   BracketWeekendIdRoute: BracketWeekendIdRoute,
+  TWeekendIdRoute: TWeekendIdRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
 }
 export const routeTree = rootRouteImport

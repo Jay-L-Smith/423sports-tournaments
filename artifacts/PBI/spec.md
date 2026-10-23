@@ -26,7 +26,7 @@ On first open, unauthenticated users see **Sign in**. **What is your role?** onl
 | --- | --- |
 | Parent / Athlete | Immediate role home. No approval. |
 | Coach / Admin | Account created. Elevated tools **off** until a current Admin approves. Meanwhile they get **Parent home**, not a dead-end wait screen. |
-| Seed `PBI.Tournaments.Temp@gmail.com` / `AshLawson` | Admin immediately, no pending. Created on boot if missing. Password is kept in sync so preview restarts do not strand the director. Comparison is case-insensitive. |
+| Seed `Jay_L_Smith@outlook.com` | Admin immediately, no pending. Created on boot if missing. Comparison is case-insensitive. |
 | First Admin fallback | If no Admin exists yet, the first Admin sign-up (any email) is also approved immediately. The seed email is always Admin even after others exist. |
 
 Pending / approved / denied status lives on **Notifications**. Admin home can Approve or Deny. Deny keeps Parent access plus a notice.
@@ -103,7 +103,7 @@ Teams register to **tournament + age**, not to a park.
 - 2026-09-21 — Admin weekends page: name, dates, age groups.
 - 2026-09-21 — Locked: multiple complexes per weekend; min/max per age; teams register to weekend+age.
 - 2026-09-21 — Admin weekend detail: locations + min/max per age.
-- 2026-09-21 — Seed Admin `PBI.Tournaments.Temp@gmail.com` / `AshLawson` is created on boot and survives preview restarts.
+- 2026-09-21 — Seed Admin `Jay_L_Smith@outlook.com` is created on boot and survives preview restarts.
 - 2026-09-21 — Renamed Weekends → Tournaments. Create form is behind Add Tournament.
 - 2026-09-21 — Coach team registration: pick tournament + age, name the team.
 - 2026-09-21 — Coach access request asks team name and reason; Admin sees both before Approve/Deny.

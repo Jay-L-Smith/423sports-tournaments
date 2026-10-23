@@ -4,12 +4,9 @@ Travel-ball tournament app. Shipped so far: **accounts, role homes, and Admin to
 
 ## Seed Admin
 
-Email: `PBI.Tournaments.Temp@gmail.com`  
-Password: `AshLawson`
+Email: `Jay_L_Smith@outlook.com`
 
-Comparison is case-insensitive (`pbi.tournaments.temp@gmail.com`).
-
-This account is created automatically on boot if it is missing, and the password is kept in sync. Sign in — do not create it again. It is **Admin immediately**.
+This account is created automatically on boot if it is missing. Sign in — do not create it again. It is **Admin immediately**.
 
 Constant: `SEED_ADMIN_EMAIL` in `src/lib/pbi/roles.ts`.
 

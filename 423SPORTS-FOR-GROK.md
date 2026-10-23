@@ -5,8 +5,7 @@
 **Do not mention competing orgs.** Brand is **423Sports Tournaments**.
 
 Seed admin (never reset, never tell the user to recreate):
-- Email: `PBI.Tournaments.Temp@gmail.com`
-- Password: `AshLawson`
+- Email: `Jay_L_Smith@outlook.com`
 
 ---
 
